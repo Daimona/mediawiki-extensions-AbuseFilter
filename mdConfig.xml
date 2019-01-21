@@ -1,0 +1,50 @@
+<?xml version="1.0"?>
+<ruleset name="PHPMD rule sets" xmlns="http://pmd.sf.net/ruleset/1.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sf.net/ruleset/1.0.0 http://pmd.sf.net/ruleset_xml_schema.xsd"
+         xsi:noNamespaceSchemaLocation="http://pmd.sf.net/ruleset_xml_schema.xsd">
+    <description>Custom rules for PHPMD</description>
+
+    <rule ref="rulesets/codesize.xml" />
+    <rule ref="rulesets/codesize.xml/TooManyPublicMethods">
+        <properties>
+            <property name="maxmethods" value="30" />
+        </properties>
+    </rule>
+    <rule ref="rulesets/codesize.xml/TooManyMethods">
+        <properties>
+            <property name="maxmethods" value="75" />
+        </properties>
+    </rule>
+         
+    <rule ref="rulesets/cleancode.xml">
+        <!-- Widely used stuff-->
+        <exclude name="StaticAccess" />
+        <exclude name="ElseExpression" />
+        <exclude name="BooleanArgumentFlag" />
+    </rule>
+         
+    <rule ref="rulesets/naming.xml">
+        <exclude name="LongVariable"/><!-- Too many false positives due to $wgAbuseFilter... variables -->
+        <exclude name="ShortVariable"/><!-- Makes sense somewhere. To be handled in the future-->
+    </rule>
+         
+    <rule ref="rulesets/controversial.xml">
+        <!-- These are indeed correct. However, there's already a patch for them, which is waiting
+        for a higher code coverage to avoid stupid mistakes. They also clog up the report.-->
+        <exclude name="CamelCaseParameterName" />
+        <exclude name="CamelCasePropertyName" />
+        <exclude name="CamelCaseVariableName" />
+    </rule>
+         
+    <rule ref="rulesets/unusedcode.xml">
+        <!-- Too many FP due to hooks etc.-->
+        <exclude name="UnusedFormalParameter" />
+        <!-- FP and already fixed stuff -->
+        <exclude name="UnusedLocalVariable" />
+    </rule>
+         
+    <rule ref="rulesets/design.xml">
+        <exclude name="CouplingBetweenObjects" /><!-- To be partially handled-->
+    </rule>
+</ruleset>
