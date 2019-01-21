@@ -1,0 +1,79 @@
+version: "2"
+checks:
+  file-lines:
+    enabled: false
+  method-count:
+    config:
+      threshold: 75
+  method-lines:
+    config:
+      threshold: 250
+plugins:
+  duplication:
+    enabled: true
+    config:
+      languages:
+      - javascript:
+      - php:
+  phpmd:
+    enabled: true
+    config:
+      rulesets: "mdConfig.xml"
+  sonar-php:
+    enabled: true
+    checks:
+      php:S1192:
+        enabled: false
+      php:S138:
+        enabled: false
+      php:S1448:
+        enabled: false
+      php:S3776:
+        enabled: false
+      php:S1172:
+        enabled: false
+  eslint:
+    enabled: true
+    channel: "eslint-4"
+  phan:
+    enabled: true
+    config:
+      file_extensions: "php"
+      dead-code-detection: true
+    checks:
+      PhanUndeclaredClassMethod:
+        enabled: false
+      PhanUndeclaredConstant:
+        enabled: false
+      PhanUndeclaredFunction:
+        enabled: false
+      PhanUndeclaredTypeParameter:
+        enabled: false
+      PhanUndeclaredClassConstant:
+        enabled: false
+      PhanUndeclaredExtendedClass:
+        enabled: false
+      PhanUnreferencedClass:
+        enabled: false
+      PhanUndeclaredMethod:
+        enabled: false
+      PhanUndeclaredTypeReturnType:
+        enabled: false
+      PhanUndeclaredTypeProperty:
+        enabled: false
+      PhanUnreferencedPublicMethod:
+        enabled: false
+      PhanUndeclaredProperty:
+        enabled: false
+      PhanUnreferencedClosure:
+        enabled: false
+      PhanUnreferencedProtectedMethod:
+        enabled: false
+      PhanUndeclaredClassInstanceof:
+        enabled: false
+      PhanUndeclaredClass:
+        enabled: false
+exclude_patterns:
+  - "i18n/"
+  - "db_patches/"
+  - "tests/parserTests"
