@@ -32,9 +32,6 @@ plugins:
         enabled: false
       php:S1172:
         enabled: false
-  eslint:
-    enabled: true
-    channel: "eslint-4"
 exclude_patterns:
   - "i18n/"
   - "db_patches/"
