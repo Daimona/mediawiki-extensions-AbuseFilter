@@ -1,14 +1,39 @@
 {
 	"root": true,
-	"extends": [
-		"wikimedia/client",
-		"wikimedia/jquery"
-	],
+	"extends": "eslint:all",
 	"globals": {
 		"mw": false,
 		"OO": false
 	},
-	"rules": {
-		"no-jquery/no-global-selector": "off"
+		"rules": {
+		"max-len": ["error", { "code": 100 }],
+		"indent": ["error", "tab"],
+		"quotes": ["error", "single"],
+		"no-tabs": 0,
+		"space-in-parens": ["error", "always"],
+		"padded-blocks": ["error", "never"],
+		"no-var": 0,
+		"no-invalid-this": 0,
+		"quote-props": ["error", "as-needed"],
+		"object-curly-spacing": ["error", "always"],
+		"object-property-newline": 0,
+		"space-before-function-paren": ["error", {"anonymous": "always", "named": "never", "asyncArrow": "always"}],
+		"prefer-template": 0,
+		"func-style": 0,
+		"func-names": ["error", "as-needed"],
+		"multiline-ternary": ["error", "always-multiline"],
+		"computed-property-spacing": ["error", "always"],
+		"init-declarations": 0,
+		"prefer-arrow-callback": 0,
+		"dot-location": ["error", "property"],
+		"newline-per-chained-call": 0,
+		"function-paren-newline": 0,
+		"no-ternary": 0,
+		"array-bracket-spacing": 0,
+		"sort-vars": 0,
+		"valid-jsdoc": ["error", { "requireReturn": false }],
+		"sort-keys": 0,
+		"id-length": ["error", { "exceptions": ["$", "e"] }],
+		"linebreak-style": 0
 	}
 }
