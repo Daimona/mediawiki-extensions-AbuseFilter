@@ -13,7 +13,8 @@
 			"Vpovilaitis",
 			"Matma Rex",
 			"Manvydasz",
-			"Hugo.arg"
+			"Hugo.arg",
+			"Fitoschido"
 		]
 	},
 	"abusefilter-desc": "Pakeitimų tikrinimui naudojamas automatinis euristinis tikrinimas",
@@ -86,7 +87,6 @@
 	"abusefilter-log-details-diff": "Redagavimo pakeitimai",
 	"abusefilter-log-linkoncontribs": "piktnaudžiavimų sąrašas",
 	"abusefilter-log-linkoncontribs-text": "{{GENDER:$1|Šio naudotojo|Šios naudotojos}} piktnaudžiavimų sąrašas",
-	"abusefilter-log-hidden": "(paslėptas įrašas)",
 	"abusefilter-log-hidden-implicit": "(paslėpta, nes peržiūra buvo panaikinta)",
 	"abusefilter-log-cannot-see-details": "Jūs neturite teisės peržiūrėti informaciją apie šį įrašą.",
 	"abusefilter-log-details-hidden": "Negalima peržiūrėti informaciją apie šį įrašą, nes jis yra paslėptas nuo viešo peržiūrėjimo.",
@@ -144,7 +144,6 @@
 	"abusefilter-edit-oldwarning": "<strong>Jūs keičiate seną šio filtro versiją.\nRodoma statistika paskaičiuota paskutinei filtro versijai.\nJei įrašysite pakeitimus, jūs perrašysite visus pakeitimus, darytus po dabar redaguojamos versijos.</strong> &bull;\n[[Special:AbuseFilter/history/$2|Grįžti į šio failo istoriją]].",
 	"abusefilter-edit-status-label": "Statistika:",
 	"abusefilter-edit-status": "{{PLURAL:$1|Paskutinis|Paskutiniai|Paskutinių}} $1 {{PLURAL:$1|veiksmas|veiksmai|veiksmų}}, šį filtrą atitiko $2 ($3%).",
-	"abusefilter-edit-status-profile": "{{PLURAL:$1|Paskutinis|Paskutiniai|Paskutinių}} $1 {{PLURAL:$1|veiksmas|veiksmai|veiksmų}}, Šį filtrą atitiko $2 ($3%). Vidutinis jų vykdymo laikas yra $4ms, sunaudota $5 {{PLURAL:$5|sąlyga|sąlygos|sąlygų}} iš limito.",
 	"abusefilter-edit-new": "Naujas filtras",
 	"abusefilter-edit-save": "Išsaugoti filtrą",
 	"abusefilter-edit-id": "Filtro ID:",
@@ -173,8 +172,8 @@
 	"abusefilter-edit-throttle-period": "Laiko tarpas (sekundėmis):",
 	"abusefilter-edit-throttle-groups": "Statistikos rinkimo grupė:\n:''(viena eilutėje, jungti kableliais)''",
 	"abusefilter-throttle-ip": "IP adresas",
-	"abusefilter-throttle-user": "Naudotojo paskyra",
-	"abusefilter-throttle-page": "Puslapis",
+	"abusefilter-throttle-user": "naudotojo paskyra",
+	"abusefilter-throttle-page": "puslapis",
 	"abusefilter-edit-warn-message": "Sisteminis pranešimas, kuris naudojamas perspėjimui:",
 	"abusefilter-edit-warn-other": "Kitas pranešimas",
 	"abusefilter-edit-warn-other-label": "Kito pranešimo puslapio vardas:\n:''(be MediaWiki priešdėlio)''",

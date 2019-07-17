@@ -1,6 +1,6 @@
 <?php
 
-use MediaWiki\MediaWikiServices;
+use MediaWiki\Logger\LoggerFactory;
 
 /**
  * Tokenizer for AbuseFilter rules.
@@ -12,7 +12,7 @@ class AbuseFilterTokenizer {
 	const ID_SYMBOL_RE = '/[0-9A-Za-z_]+/A';
 	const OPERATOR_RE =
 		'/(\!\=\=|\!\=|\!|\*\*|\*|\/|\+|\-|%|&|\||\^|\:\=|\?|\:|\<\=|\<|\>\=|\>|\=\=\=|\=\=|\=)/A';
-	const RADIX_RE = '/([0-9A-Fa-f]+(?:\.\d*)?|\.\d+)([bxo])?/Au';
+	const RADIX_RE = '/([0-9A-Fa-f]+(?:\.\d*)?|\.\d+)([bxo])?(?![a-z])/Au';
 	const WHITESPACE = "\011\012\013\014\015\040";
 
 	// Order is important. The punctuation-matching regex requires that
@@ -67,34 +67,42 @@ class AbuseFilterTokenizer {
 	];
 
 	/**
-	 * @param string $code
-	 * @return array
-	 * @throws AFPException
-	 * @throws AFPUserVisibleException
+	 * Get a cache key used to store the tokenized code
+	 *
+	 * @param BagOStuff $cache
+	 * @param string $code Not yet tokenized
+	 * @return string
+	 * @internal
 	 */
-	public static function tokenize( $code ) {
-		static $tokenizerCache = null;
+	public static function getCacheKey( BagOStuff $cache, $code ) {
+		return $cache->makeGlobalKey( __CLASS__, self::CACHE_VERSION, crc32( $code ) );
+	}
 
-		if ( !$tokenizerCache ) {
-			$tokenizerCache = ObjectCache::getLocalServerInstance( 'hash' );
-		}
+	/**
+	 * Get the tokens for the given code.
+	 *
+	 * @param string $code
+	 * @return array[]
+	 */
+	public static function getTokens( $code ) {
+		$cache = ObjectCache::getLocalServerInstance( 'hash' );
 
-		static $stats = null;
+		$tokens = $cache->getWithSetCallback(
+			self::getCacheKey( $cache, $code ),
+			$cache::TTL_DAY,
+			function () use ( $code ) {
+				return self::tokenize( $code );
+			}
+		);
 
-		if ( !$stats ) {
-			$stats = MediaWikiServices::getInstance()->getStatsdDataFactory();
-		}
+		return $tokens;
+	}
 
-		$cacheKey = wfGlobalCacheKey( __CLASS__, self::CACHE_VERSION, crc32( $code ) );
-
-		$tokens = $tokenizerCache->get( $cacheKey );
-
-		if ( $tokens ) {
-			$stats->increment( 'abusefilter.tokenizerCache.hit' );
-			return $tokens;
-		}
-
-		$stats->increment( 'abusefilter.tokenizerCache.miss' );
+	/**
+	 * @param string $code
+	 * @return array[]
+	 */
+	private static function tokenize( $code ) {
 		$tokens = [];
 		$curPos = 0;
 
@@ -103,8 +111,6 @@ class AbuseFilterTokenizer {
 			$token = self::nextToken( $code, $curPos );
 			$tokens[ $token->pos ] = [ $token, $curPos ];
 		} while ( $curPos !== $prevPos );
-
-		$tokenizerCache->set( $cacheKey, $tokens, 60 * 60 * 24 );
 
 		return $tokens;
 	}
@@ -159,8 +165,7 @@ class AbuseFilterTokenizer {
 
 		// Numbers
 		if ( preg_match( self::RADIX_RE, $code, $matches, 0, $offset ) ) {
-			$token = $matches[0];
-			$input = $matches[1];
+			list( $token, $input ) = $matches;
 			$baseChar = $matches[2] ?? null;
 			// Sometimes the base char gets mixed in with the rest of it because
 			// the regex targets hex, too.
@@ -171,6 +176,14 @@ class AbuseFilterTokenizer {
 			}
 
 			$base = $baseChar ? self::$bases[$baseChar] : 10;
+			if ( $base !== 10 ) {
+				// Our syntax is awful. Keep track of every use, and possibly change it!
+				$logger = LoggerFactory::getInstance( 'AbuseFilter' );
+				$logger->info(
+					'Found non-decimal number. Base: {number_base}, number: {number_input}',
+					[ 'number_base' => $base, 'number_input' => $input ]
+				);
+			}
 
 			// Check against the appropriate character class for input validation
 
@@ -223,7 +236,7 @@ class AbuseFilterTokenizer {
 			if ( $addLength ) {
 				$token .= substr( $code, $offset, $addLength );
 				$offset += $addLength;
-			} elseif ( $code[$offset] == '\\' ) {
+			} elseif ( $code[$offset] === '\\' ) {
 				switch ( $code[$offset + 1] ) {
 					case '\\':
 						$token .= '\\';
@@ -259,8 +272,10 @@ class AbuseFilterTokenizer {
 
 			} else {
 				// Should never happen
+				// @codeCoverageIgnoreStart
 				$token .= $code[$offset];
 				$offset++;
+				// @codeCoverageIgnoreEnd
 			}
 		}
 		throw new AFPUserVisibleException( 'unclosedstring', $offset, [] );

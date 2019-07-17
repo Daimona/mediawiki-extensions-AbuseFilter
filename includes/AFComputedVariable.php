@@ -5,8 +5,21 @@ use MediaWiki\MediaWikiServices;
 use MediaWiki\Logger\LoggerFactory;
 
 class AFComputedVariable {
-	public $mMethod, $mParameters;
+	/**
+	 * @var string The method used to compute the variable
+	 */
+	public $mMethod;
+	/**
+	 * @var array Parameters to be used with the specified method
+	 */
+	public $mParameters;
+	/**
+	 * @var array Cache containing User objects already constructed
+	 */
 	public static $userCache = [];
+	/**
+	 * @var array Cache containing Page objects already constructed
+	 */
 	public static $articleCache = [];
 
 	/**
@@ -72,22 +85,17 @@ class AFComputedVariable {
 		}
 
 		if ( $user instanceof User ) {
-			$userCache[$username] = $user;
-			return $user;
+			$ret = $user;
+		} elseif ( IP::isIPAddress( $username ) ) {
+			$ret = new User;
+			$ret->setName( $username );
+		} else {
+			$ret = User::newFromName( $username );
+			$ret->load();
 		}
+		self::$userCache[$username] = $ret;
 
-		if ( IP::isIPAddress( $username ) ) {
-			$u = new User;
-			$u->setName( $username );
-			self::$userCache[$username] = $u;
-			return $u;
-		}
-
-		$user = User::newFromName( $username );
-		$user->load();
-		self::$userCache[$username] = $user;
-
-		return $user;
+		return $ret;
 	}
 
 	/**
@@ -140,7 +148,7 @@ class AFComputedVariable {
 
 	/**
 	 * @param AbuseFilterVariableHolder $vars
-	 * @return AFPData|array|int|mixed|null|string
+	 * @return AFPData
 	 * @throws MWException
 	 * @throws AFPException
 	 */
@@ -213,8 +221,15 @@ class AFComputedVariable {
 
 					$new_text = $vars->getVar( $textVar )->toString();
 					$content = ContentHandler::makeContent( $new_text, $article->getTitle() );
-					$editInfo = $article->prepareContentForEdit( $content );
-					$links = array_keys( $editInfo->output->getExternalLinks() );
+					try {
+						// @fixme TEMPORARY WORKAROUND FOR T187153
+						$editInfo = $article->prepareContentForEdit( $content );
+						$links = array_keys( $editInfo->output->getExternalLinks() );
+					} catch ( BadMethodCallException $e ) {
+						$logger = LoggerFactory::getInstance( 'AbuseFilter' );
+						$logger->warning( 'Caught BadMethodCallException - T187153' );
+						$links = [];
+					}
 					$result = $links;
 					break;
 				}
@@ -228,7 +243,7 @@ class AFComputedVariable {
 				);
 
 				$logger = LoggerFactory::getInstance( 'AbuseFilter' );
-				if ( $vars->getVar( 'context' )->toString() == 'filter' ) {
+				if ( $vars->forFilter ) {
 					$links = $this->getLinksFromDB( $article );
 					$logger->debug( 'Loading old links from DB' );
 				} elseif ( $article->getContentModel() === CONTENT_MODEL_WIKITEXT ) {
@@ -258,10 +273,10 @@ class AFComputedVariable {
 				$oldLinks = explode( "\n", $oldLinks );
 				$newLinks = explode( "\n", $newLinks );
 
-				if ( $this->mMethod == 'link-diff-added' ) {
+				if ( $this->mMethod === 'link-diff-added' ) {
 					$result = array_diff( $newLinks, $oldLinks );
 				}
-				if ( $this->mMethod == 'link-diff-removed' ) {
+				if ( $this->mMethod === 'link-diff-removed' ) {
 					$result = array_diff( $oldLinks, $newLinks );
 				}
 				break;
@@ -280,7 +295,13 @@ class AFComputedVariable {
 
 					$new_text = $vars->getVar( $textVar )->toString();
 					$content = ContentHandler::makeContent( $new_text, $article->getTitle() );
-					$editInfo = $article->prepareContentForEdit( $content );
+					try {
+						// @fixme TEMPORARY WORKAROUND FOR T187153
+						$editInfo = $article->prepareContentForEdit( $content );
+					} catch ( BadMethodCallException $e ) {
+						$result = '';
+						break;
+					}
 					if ( isset( $parameters['pst'] ) && $parameters['pst'] ) {
 						$result = $editInfo->pstContent->serialize( $editInfo->format );
 					} else {
@@ -361,12 +382,17 @@ class AFComputedVariable {
 
 				$result = call_user_func( [ $obj, $method ] );
 				break;
+			case 'user-block':
+				// @todo Support partial blocks
+				$user = $parameters['user'];
+				$result = (bool)$user->getBlock();
+				break;
 			case 'user-age':
 				$user = $parameters['user'];
 				$asOf = $parameters['asof'];
 				$obj = self::getUserObject( $user );
 
-				if ( $obj->getId() == 0 ) {
+				if ( $obj->getId() === 0 ) {
 					$result = 0;
 					break;
 				}

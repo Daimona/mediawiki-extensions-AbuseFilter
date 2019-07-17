@@ -70,7 +70,7 @@ class AFPTreeParser {
 	 * @return AFPTreeNode|null
 	 */
 	public function parse( $code ) {
-		$this->mTokens = AbuseFilterTokenizer::tokenize( $code );
+		$this->mTokens = AbuseFilterTokenizer::getTokens( $code );
 		$this->mPos = 0;
 
 		return $this->doLevelEntry();
@@ -86,7 +86,7 @@ class AFPTreeParser {
 	protected function doLevelEntry() {
 		$result = $this->doLevelSemicolon();
 
-		if ( $this->mCur->type != AFPToken::TNONE ) {
+		if ( $this->mCur->type !== AFPToken::TNONE ) {
 			throw new AFPUserVisibleException(
 				'unexpectedatend',
 				$this->mPos, [ $this->mCur->type ]
@@ -108,23 +108,25 @@ class AFPTreeParser {
 			$this->move();
 			$position = $this->mPos;
 
-			if ( $this->mCur->type == AFPToken::TNONE ) {
+			if ( $this->mCur->type === AFPToken::TNONE ||
+				( $this->mCur->type === AFPToken::TBRACE && $this->mCur->value == ')' )
+			) {
 				break;
 			}
 
 			// Allow empty statements.
-			if ( $this->mCur->type == AFPToken::TSTATEMENTSEPARATOR ) {
+			if ( $this->mCur->type === AFPToken::TSTATEMENTSEPARATOR ) {
 				continue;
 			}
 
 			$statements[] = $this->doLevelSet();
 			$position = $this->mPos;
-		} while ( $this->mCur->type == AFPToken::TSTATEMENTSEPARATOR );
+		} while ( $this->mCur->type === AFPToken::TSTATEMENTSEPARATOR );
 
 		// Flatten the tree if possible.
-		if ( count( $statements ) == 0 ) {
+		if ( count( $statements ) === 0 ) {
 			return null;
-		} elseif ( count( $statements ) == 1 ) {
+		} elseif ( count( $statements ) === 1 ) {
 			return $statements[0];
 		} else {
 			return new AFPTreeNode( AFPTreeNode::SEMICOLON, $statements, $position );
@@ -138,7 +140,7 @@ class AFPTreeParser {
 	 * @throws AFPUserVisibleException
 	 */
 	protected function doLevelSet() {
-		if ( $this->mCur->type == AFPToken::TID ) {
+		if ( $this->mCur->type === AFPToken::TID ) {
 			$varname = $this->mCur->value;
 
 			// Speculatively parse the assignment statement assuming it can
@@ -146,7 +148,7 @@ class AFPTreeParser {
 			$initialState = $this->getState();
 			$this->move();
 
-			if ( $this->mCur->type == AFPToken::TOP && $this->mCur->value == ':=' ) {
+			if ( $this->mCur->type === AFPToken::TOP && $this->mCur->value === ':=' ) {
 				$position = $this->mPos;
 				$this->move();
 				$value = $this->doLevelSet();
@@ -154,24 +156,24 @@ class AFPTreeParser {
 				return new AFPTreeNode( AFPTreeNode::ASSIGNMENT, [ $varname, $value ], $position );
 			}
 
-			if ( $this->mCur->type == AFPToken::TSQUAREBRACKET && $this->mCur->value == '[' ) {
+			if ( $this->mCur->type === AFPToken::TSQUAREBRACKET && $this->mCur->value === '[' ) {
 				$this->move();
 
-				if ( $this->mCur->type == AFPToken::TSQUAREBRACKET && $this->mCur->value == ']' ) {
+				if ( $this->mCur->type === AFPToken::TSQUAREBRACKET && $this->mCur->value === ']' ) {
 					$index = 'append';
 				} else {
 					// Parse index offset.
 					$this->setState( $initialState );
 					$this->move();
 					$index = $this->doLevelSemicolon();
-					if ( !( $this->mCur->type == AFPToken::TSQUAREBRACKET && $this->mCur->value == ']' ) ) {
+					if ( !( $this->mCur->type === AFPToken::TSQUAREBRACKET && $this->mCur->value === ']' ) ) {
 						throw new AFPUserVisibleException( 'expectednotfound', $this->mPos,
 							[ ']', $this->mCur->type, $this->mCur->value ] );
 					}
 				}
 
 				$this->move();
-				if ( $this->mCur->type == AFPToken::TOP && $this->mCur->value == ':=' ) {
+				if ( $this->mCur->type === AFPToken::TOP && $this->mCur->value === ':=' ) {
 					$position = $this->mPos;
 					$this->move();
 					$value = $this->doLevelSet();
@@ -203,12 +205,12 @@ class AFPTreeParser {
 	 * @throws AFPUserVisibleException
 	 */
 	protected function doLevelConditions() {
-		if ( $this->mCur->type == AFPToken::TKEYWORD && $this->mCur->value == 'if' ) {
+		if ( $this->mCur->type === AFPToken::TKEYWORD && $this->mCur->value === 'if' ) {
 			$position = $this->mPos;
 			$this->move();
 			$condition = $this->doLevelBoolOps();
 
-			if ( !( $this->mCur->type == AFPToken::TKEYWORD && $this->mCur->value == 'then' ) ) {
+			if ( !( $this->mCur->type === AFPToken::TKEYWORD && $this->mCur->value === 'then' ) ) {
 				throw new AFPUserVisibleException( 'expectednotfound',
 					$this->mPos,
 					[
@@ -222,7 +224,7 @@ class AFPTreeParser {
 
 			$valueIfTrue = $this->doLevelConditions();
 
-			if ( !( $this->mCur->type == AFPToken::TKEYWORD && $this->mCur->value == 'else' ) ) {
+			if ( !( $this->mCur->type === AFPToken::TKEYWORD && $this->mCur->value === 'else' ) ) {
 				throw new AFPUserVisibleException( 'expectednotfound',
 					$this->mPos,
 					[
@@ -236,7 +238,7 @@ class AFPTreeParser {
 
 			$valueIfFalse = $this->doLevelConditions();
 
-			if ( !( $this->mCur->type == AFPToken::TKEYWORD && $this->mCur->value == 'end' ) ) {
+			if ( !( $this->mCur->type === AFPToken::TKEYWORD && $this->mCur->value === 'end' ) ) {
 				throw new AFPUserVisibleException( 'expectednotfound',
 					$this->mPos,
 					[
@@ -256,12 +258,12 @@ class AFPTreeParser {
 		}
 
 		$condition = $this->doLevelBoolOps();
-		if ( $this->mCur->type == AFPToken::TOP && $this->mCur->value == '?' ) {
+		if ( $this->mCur->type === AFPToken::TOP && $this->mCur->value === '?' ) {
 			$position = $this->mPos;
 			$this->move();
 
 			$valueIfTrue = $this->doLevelConditions();
-			if ( !( $this->mCur->type == AFPToken::TOP && $this->mCur->value == ':' ) ) {
+			if ( !( $this->mCur->type === AFPToken::TOP && $this->mCur->value === ':' ) ) {
 				throw new AFPUserVisibleException( 'expectednotfound',
 					$this->mPos,
 					[
@@ -292,7 +294,7 @@ class AFPTreeParser {
 	protected function doLevelBoolOps() {
 		$leftOperand = $this->doLevelCompares();
 		$ops = [ '&', '|', '^' ];
-		while ( $this->mCur->type == AFPToken::TOP && in_array( $this->mCur->value, $ops ) ) {
+		while ( $this->mCur->type === AFPToken::TOP && in_array( $this->mCur->value, $ops ) ) {
 			$op = $this->mCur->value;
 			$position = $this->mPos;
 			$this->move();
@@ -315,9 +317,16 @@ class AFPTreeParser {
 	 */
 	protected function doLevelCompares() {
 		$leftOperand = $this->doLevelSumRels();
-		$ops = [ '==', '===', '!=', '!==', '<', '>', '<=', '>=', '=' ];
-		while ( $this->mCur->type == AFPToken::TOP && in_array( $this->mCur->value, $ops ) ) {
+		$equalityOps = [ '==', '===', '!=', '!==', '=' ];
+		$orderOps = [ '<', '>', '<=', '>=' ];
+		// Only allow either a single operation, or a combination of a single equalityOps and a single
+		// orderOps. This resembles what PHP does, and allows `a < b == c` while rejecting `a < b < c`
+		$allowedOps = array_merge( $equalityOps, $orderOps );
+		while ( $this->mCur->type === AFPToken::TOP && in_array( $this->mCur->value, $allowedOps ) ) {
 			$op = $this->mCur->value;
+			$allowedOps = in_array( $op, $equalityOps ) ?
+				array_diff( $allowedOps, $equalityOps ) :
+				array_diff( $allowedOps, $orderOps );
 			$position = $this->mPos;
 			$this->move();
 			$rightOperand = $this->doLevelSumRels();
@@ -338,7 +347,7 @@ class AFPTreeParser {
 	protected function doLevelSumRels() {
 		$leftOperand = $this->doLevelMulRels();
 		$ops = [ '+', '-' ];
-		while ( $this->mCur->type == AFPToken::TOP && in_array( $this->mCur->value, $ops ) ) {
+		while ( $this->mCur->type === AFPToken::TOP && in_array( $this->mCur->value, $ops ) ) {
 			$op = $this->mCur->value;
 			$position = $this->mPos;
 			$this->move();
@@ -360,7 +369,7 @@ class AFPTreeParser {
 	protected function doLevelMulRels() {
 		$leftOperand = $this->doLevelPow();
 		$ops = [ '*', '/', '%' ];
-		while ( $this->mCur->type == AFPToken::TOP && in_array( $this->mCur->value, $ops ) ) {
+		while ( $this->mCur->type === AFPToken::TOP && in_array( $this->mCur->value, $ops ) ) {
 			$op = $this->mCur->value;
 			$position = $this->mPos;
 			$this->move();
@@ -381,7 +390,7 @@ class AFPTreeParser {
 	 */
 	protected function doLevelPow() {
 		$base = $this->doLevelBoolInvert();
-		while ( $this->mCur->type == AFPToken::TOP && $this->mCur->value == '**' ) {
+		while ( $this->mCur->type === AFPToken::TOP && $this->mCur->value === '**' ) {
 			$position = $this->mPos;
 			$this->move();
 			$exponent = $this->doLevelBoolInvert();
@@ -396,7 +405,7 @@ class AFPTreeParser {
 	 * @return AFPTreeNode
 	 */
 	protected function doLevelBoolInvert() {
-		if ( $this->mCur->type == AFPToken::TOP && $this->mCur->value == '!' ) {
+		if ( $this->mCur->type === AFPToken::TOP && $this->mCur->value === '!' ) {
 			$position = $this->mPos;
 			$this->move();
 			$argument = $this->doLevelKeywordOperators();
@@ -414,7 +423,7 @@ class AFPTreeParser {
 	protected function doLevelKeywordOperators() {
 		$leftOperand = $this->doLevelUnarys();
 		$keyword = strtolower( $this->mCur->value );
-		if ( $this->mCur->type == AFPToken::TKEYWORD &&
+		if ( $this->mCur->type === AFPToken::TKEYWORD &&
 			isset( AbuseFilterParser::$mKeywords[$keyword] )
 		) {
 			$position = $this->mPos;
@@ -438,7 +447,7 @@ class AFPTreeParser {
 	 */
 	protected function doLevelUnarys() {
 		$op = $this->mCur->value;
-		if ( $this->mCur->type == AFPToken::TOP && ( $op == "+" || $op == "-" ) ) {
+		if ( $this->mCur->type === AFPToken::TOP && ( $op === "+" || $op === "-" ) ) {
 			$position = $this->mPos;
 			$this->move();
 			$argument = $this->doLevelArrayElements();
@@ -455,12 +464,12 @@ class AFPTreeParser {
 	 */
 	protected function doLevelArrayElements() {
 		$array = $this->doLevelParenthesis();
-		while ( $this->mCur->type == AFPToken::TSQUAREBRACKET && $this->mCur->value == '[' ) {
+		while ( $this->mCur->type === AFPToken::TSQUAREBRACKET && $this->mCur->value === '[' ) {
 			$position = $this->mPos;
 			$index = $this->doLevelSemicolon();
 			$array = new AFPTreeNode( AFPTreeNode::ARRAY_INDEX, [ $array, $index ], $position );
 
-			if ( !( $this->mCur->type == AFPToken::TSQUAREBRACKET && $this->mCur->value == ']' ) ) {
+			if ( !( $this->mCur->type === AFPToken::TSQUAREBRACKET && $this->mCur->value === ']' ) ) {
 				throw new AFPUserVisibleException( 'expectednotfound', $this->mPos,
 					[ ']', $this->mCur->type, $this->mCur->value ] );
 			}
@@ -477,10 +486,10 @@ class AFPTreeParser {
 	 * @throws AFPUserVisibleException
 	 */
 	protected function doLevelParenthesis() {
-		if ( $this->mCur->type == AFPToken::TBRACE && $this->mCur->value == '(' ) {
+		if ( $this->mCur->type === AFPToken::TBRACE && $this->mCur->value === '(' ) {
 			$result = $this->doLevelSemicolon();
 
-			if ( !( $this->mCur->type == AFPToken::TBRACE && $this->mCur->value == ')' ) ) {
+			if ( !( $this->mCur->type === AFPToken::TBRACE && $this->mCur->value === ')' ) ) {
 				throw new AFPUserVisibleException(
 					'expectednotfound',
 					$this->mPos,
@@ -502,13 +511,13 @@ class AFPTreeParser {
 	 * @throws AFPUserVisibleException
 	 */
 	protected function doLevelFunction() {
-		if ( $this->mCur->type == AFPToken::TID &&
+		if ( $this->mCur->type === AFPToken::TID &&
 			isset( AbuseFilterParser::$mFunctions[$this->mCur->value] )
 		) {
 			$func = $this->mCur->value;
 			$position = $this->mPos;
 			$this->move();
-			if ( $this->mCur->type != AFPToken::TBRACE || $this->mCur->value != '(' ) {
+			if ( $this->mCur->type !== AFPToken::TBRACE || $this->mCur->value !== '(' ) {
 				throw new AFPUserVisibleException( 'expectednotfound',
 					$this->mPos,
 					[
@@ -522,9 +531,9 @@ class AFPTreeParser {
 			$args = [];
 			do {
 				$args[] = $this->doLevelSemicolon();
-			} while ( $this->mCur->type == AFPToken::TCOMMA );
+			} while ( $this->mCur->type === AFPToken::TCOMMA );
 
-			if ( $this->mCur->type != AFPToken::TBRACE || $this->mCur->value != ')' ) {
+			if ( $this->mCur->type !== AFPToken::TBRACE || $this->mCur->value !== ')' ) {
 				throw new AFPUserVisibleException( 'expectednotfound',
 					$this->mPos,
 					[
@@ -570,20 +579,20 @@ class AFPTreeParser {
 				);
 			/** @noinspection PhpMissingBreakStatementInspection */
 			case AFPToken::TSQUAREBRACKET:
-				if ( $this->mCur->value == '[' ) {
+				if ( $this->mCur->value === '[' ) {
 					$array = [];
 					while ( true ) {
 						$this->move();
-						if ( $this->mCur->type == AFPToken::TSQUAREBRACKET && $this->mCur->value == ']' ) {
+						if ( $this->mCur->type === AFPToken::TSQUAREBRACKET && $this->mCur->value === ']' ) {
 							break;
 						}
 
 						$array[] = $this->doLevelSet();
 
-						if ( $this->mCur->type == AFPToken::TSQUAREBRACKET && $this->mCur->value == ']' ) {
+						if ( $this->mCur->type === AFPToken::TSQUAREBRACKET && $this->mCur->value === ']' ) {
 							break;
 						}
-						if ( $this->mCur->type != AFPToken::TCOMMA ) {
+						if ( $this->mCur->type !== AFPToken::TCOMMA ) {
 							throw new AFPUserVisibleException(
 								'expectednotfound',
 								$this->mPos,

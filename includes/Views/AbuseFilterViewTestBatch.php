@@ -1,19 +1,45 @@
 <?php
 
 class AbuseFilterViewTestBatch extends AbuseFilterView {
-	// Hard-coded for now.
+	/**
+	 * @var int The limit of changes to test, hard coded for now
+	 */
 	protected static $mChangeLimit = 100;
 
-	public $mShowNegative, $mTestPeriodStart, $mTestPeriodEnd, $mTestPage;
-	public $mTestUser, $mExcludeBots, $mTestAction;
+	/**
+	 * @var bool Whether to show changes that don't trigger the specified pattern
+	 */
+	public $mShowNegative;
+	/**
+	 * @var string The start time of the lookup period
+	 */
+	public $mTestPeriodStart;
+	/**
+	 * @var string The end time of the lookup period
+	 */
+	public $mTestPeriodEnd;
+	/**
+	 * @var string The page of which edits we're interested in
+	 */
+	public $mTestPage;
+	/**
+	 * @var string The user whose actions we want to test
+	 */
+	public $mTestUser;
+	/**
+	 * @var bool Whether to exclude bot edits
+	 */
+	public $mExcludeBots;
+	/**
+	 * @var string The action (performed by the user) we want to search for
+	 */
+	public $mTestAction;
 
 	/**
 	 * Shows the page
 	 */
 	public function show() {
 		$out = $this->getOutput();
-
-		AbuseFilter::disableConditionLimit();
 
 		if ( !$this->canViewPrivate() ) {
 			$out->addWikiMsg( 'abusefilter-mustviewprivateoredit' );
@@ -54,8 +80,8 @@ class AbuseFilterViewTestBatch extends AbuseFilterView {
 				$this->msg( 'abusefilter-test-search-type-edit' )->text() => 'edit',
 				$this->msg( 'abusefilter-test-search-type-move' )->text() => 'move',
 				$this->msg( 'abusefilter-test-search-type-delete' )->text() => 'delete',
-				$this->msg( 'abusefilter-test-search-type-createaccount' )->text() => 'createaccount'
-				// @ToDo: add 'upload' once T170249 is resolved
+				$this->msg( 'abusefilter-test-search-type-createaccount' )->text() => 'createaccount',
+				$this->msg( 'abusefilter-test-search-type-upload' )->text() => 'upload'
 			]
 		];
 		$formFields['wpTestUser'] = [
@@ -164,7 +190,7 @@ class AbuseFilterViewTestBatch extends AbuseFilterView {
 			$conds['rc_bot'] = 0;
 		}
 
-		$action = $this->mTestAction != '0' ? $this->mTestAction : false;
+		$action = $this->mTestAction !== '0' ? $this->mTestAction : false;
 		$conds[] = $this->buildTestConditions( $dbr, $action );
 
 		// Get our ChangesList
@@ -190,12 +216,16 @@ class AbuseFilterViewTestBatch extends AbuseFilterView {
 				continue;
 			}
 
-			$result = AbuseFilter::checkConditions( $this->mFilter, $vars );
+			$parserClass = $this->getConfig()->get( 'AbuseFilterParserClass' );
+			/** @var AbuseFilterParser $parser */
+			$parser = new $parserClass( $vars );
+			$parser->toggleConditionLimit( false );
+			$result = AbuseFilter::checkConditions( $this->mFilter, $parser );
 
 			if ( $result || $this->mShowNegative ) {
 				// Stash result in RC item
 				$rc = RecentChange::newFromRow( $row );
-				/** @suppress PhanUndeclaredProperty for $rc->filterResult, which isn't a big deal */
+				// @phan-suppress-next-line PhanUndeclaredProperty not a big deal
 				$rc->filterResult = $result;
 				$rc->counter = $counter++;
 				$output .= $changesList->recentChangesLine( $rc, false );

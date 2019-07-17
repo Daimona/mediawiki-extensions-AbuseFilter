@@ -1,7 +1,5 @@
 <?php
 /**
- * Tests for the AFPData class
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -25,50 +23,18 @@
 /**
  * @group Test
  * @group AbuseFilter
+ * @group AbuseFilterParser
  *
  * @covers AbuseFilterTokenizer
  * @covers AFPToken
  * @covers AbuseFilterParser
+ * @covers AbuseFilterCachingParser
+ * @covers AFPTreeParser
+ * @covers AFPTreeNode
  * @covers AFPUserVisibleException
  * @covers AFPException
  */
-class AbuseFilterTokenizerTest extends MediaWikiTestCase {
-	/**
-	 * @return AbuseFilterParser
-	 */
-	public static function getParser() {
-		static $parser = null;
-		if ( !$parser ) {
-			$parser = new AbuseFilterParser();
-		} else {
-			$parser->resetState();
-		}
-		return $parser;
-	}
-
-	/**
-	 * Base method for testing exceptions
-	 *
-	 * @param string $excep Identifier of the exception (e.g. 'unexpectedtoken')
-	 * @param string $expr The expression to test
-	 * @param string $caller The function where the exception is thrown
-	 */
-	private function exceptionTest( $excep, $expr, $caller ) {
-		$parser = self::getParser();
-		try {
-			$parser->parse( $expr );
-		} catch ( AFPUserVisibleException $e ) {
-			$this->assertEquals(
-				$excep,
-				$e->mExceptionID,
-				"Exception $excep not thrown in AbuseFilterTokenizer::$caller"
-			);
-			return;
-		}
-
-		$this->fail( "Exception $excep not thrown in AbuseFilterTokenizer::$caller" );
-	}
-
+class AbuseFilterTokenizerTest extends AbuseFilterParserTestCase {
 	/**
 	 * Test the 'unclosedcomment' exception
 	 *
@@ -141,6 +107,38 @@ class AbuseFilterTokenizerTest extends MediaWikiTestCase {
 	public function unclosedString() {
 		return [
 			[ '"', 'readStringLiteral' ],
+		];
+	}
+
+	/**
+	 * Test that tokenized code is saved in cache
+	 *
+	 * @param string $code To be tokenized
+	 * @dataProvider provideCode
+	 */
+	public function testCaching( $code ) {
+		$cache = new HashBagOStuff();
+		$this->setService( 'LocalServerObjectCache', $cache );
+
+		$key = AbuseFilterTokenizer::getCacheKey( $cache, $code );
+
+		// Other tests may have already cached the same code.
+		$cache->delete( $key );
+		AbuseFilterTokenizer::getTokens( $code );
+		$this->assertNotFalse( $cache->get( $key ) );
+	}
+
+	/**
+	 * Data provider for testCaching
+	 *
+	 * @return array
+	 */
+	public function provideCode() {
+		return [
+			[ '1 === 1' ],
+			[ 'added_lines irlike "test"' ],
+			[ 'edit_delta > 57 & action === "edit"' ],
+			[ '!("confirmed") in user_groups' ]
 		];
 	}
 }

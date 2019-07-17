@@ -3,7 +3,8 @@
 		"authors": [
 			"Ooswesthoesbes",
 			"Pahles",
-			"Matma Rex"
+			"Matma Rex",
+			"Fitoschido"
 		]
 	},
 	"abusefilter-desc": "Veurtj automatisch heuristische analyse oet op bewerkinge",
@@ -73,7 +74,6 @@
 	"abusefilter-log-details-diff": "Bewèrkingsangeringer",
 	"abusefilter-log-linkoncontribs": "filterlogbook",
 	"abusefilter-log-linkoncontribs-text": "Filterlogbook veur deze {{GENDER:$1|gebroeker}}",
-	"abusefilter-log-hidden": "(meljing verbórge)",
 	"abusefilter-log-hidden-implicit": "(verstaoke went de versie is eweggesjaf)",
 	"abusefilter-log-cannot-see-details": "Doe höbs neet de rechte veur de details van dezen ingank te betrachte.",
 	"abusefilter-log-cannot-see-private-details": "Doe höbs gein rechte veur de private details van dezen ingank te betrachte.",
@@ -126,7 +126,6 @@
 	"abusefilter-edit-oldwarning": "<strong>Doe bis 'n aaj versie van deze filter aan 't bewirke.\nDe weergegeve sjtattestieke gelje veur de lèste versie van dit filter.\nEs de dien wieziginge opsjleis, euversjriefs te alle wieziginge die nao deze versie zeen gemaak.</strong> &bull;\n[[Special:AbuseFilter/history/$2|Trög nao de gesjiedenis van dit filter]]",
 	"abusefilter-edit-status-label": "Euverzich:",
 	"abusefilter-edit-status": "{{PLURAL:$1|De lèste hanjeling voldeech|Van de lèste $1 hanjelinge voldege d'r $2}} aon dit filter ($3%).",
-	"abusefilter-edit-status-profile": "{{PLURAL:$1|De lèste hanjeling voldeech|Van de lèste $1 hanjelinge voldege d'r $2}} aon dit filter ($3%).\nDe gemiddelde louptied van de filtercontrole is $4ms, en deze gebroek $5 {{PLURAL:$5|conditie|condities}} van de conditielimiet.",
 	"abusefilter-edit-new": "Nuuj filter",
 	"abusefilter-edit-save": "Slaon filter op",
 	"abusefilter-edit-id": "Filternummer:",
@@ -298,7 +297,7 @@
 	"abusefilter-exception-dividebyzero": "Ongeljige poging toet deile van $2 door nul bie karakter $1.",
 	"abusefilter-exception-unrecognisedvar": "Onherkènbare variabele $2 bie karakter $1",
 	"abusefilter-exception-notenoughargs": "d'r Zeen neet zat parameters ingegaeve veur de functie $2 die is aangeropen in karakter $1.\nd'r {{PLURAL:$3|Woort eine paramaeter|Woorte $3 paramaeters}} verwach en d'r {{PLURAL:$4|is t'r eine|zeen d'r $4}} aangetróffe.",
-	"abusefilter-exception-regexfailure": "d'r Is 'n fout aangetróffen in de regulier expressie \"$3\" bie karakter $1: \"$2\"",
+	"abusefilter-exception-regexfailure": "d'r Is 'n fout aangetróffen in de regulier expressie \"$2\" bie karakter $1.",
 	"abusefilter-exception-overridebuiltin": "De ingeboewde variable \"$2\" is vervange bie karakter $1.\nDit is neet toegestange.",
 	"abusefilter-exception-outofbounds": "d'r Is getrach e lieselement ($2 bie liesgruuedje $3) op te haole det neet besteit bie karakter $1.",
 	"abusefilter-exception-notarray": "d'r Is getrach e verzamelingselement op te vraogen oet get det gein verzameling is bie karakter $1.",

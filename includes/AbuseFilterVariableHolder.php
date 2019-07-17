@@ -2,10 +2,10 @@
 
 class AbuseFilterVariableHolder {
 	/** @var (AFPData|AFComputedVariable)[] */
-	public $mVars = [];
+	private $mVars = [];
 
-	/** @var string[] Variables used to store meta-data, we'd better be safe. See T191715 */
-	public static $varBlacklist = [ 'context', 'global_log_ids', 'local_log_ids' ];
+	/** @var bool Whether this object is being used for an ongoing action being filtered */
+	public $forFilter = false;
 
 	/** @var int 2 is the default and means that new variables names (from T173889) should be used.
 	 *    1 means that the old ones should be used, e.g. if this object is constructed from an
@@ -27,6 +27,15 @@ class AbuseFilterVariableHolder {
 	}
 
 	/**
+	 * Get all variables stored in this object
+	 *
+	 * @return (AFPData|AFComputedVariable)[]
+	 */
+	public function getVars() {
+		return $this->mVars;
+	}
+
+	/**
 	 * @param string $variable
 	 * @param string $method
 	 * @param array $parameters
@@ -39,30 +48,31 @@ class AbuseFilterVariableHolder {
 	/**
 	 * Get a variable from the current object
 	 *
-	 * @param string $variable
+	 * @param string $varName The variable name
 	 * @return AFPData
 	 */
-	public function getVar( $variable ) {
-		$variable = strtolower( $variable );
-		if ( $this->mVarsVersion === 1 && in_array( $variable, AbuseFilter::getDeprecatedVariables() ) ) {
+	public function getVar( $varName ) {
+		$varName = strtolower( $varName );
+		if ( $this->mVarsVersion === 1 && in_array( $varName, AbuseFilter::getDeprecatedVariables() ) ) {
 			// Variables are stored with old names, but the parser has given us
 			// a new name. Translate it back.
-			$variable = array_search( $variable, AbuseFilter::getDeprecatedVariables() );
+			$varName = array_search( $varName, AbuseFilter::getDeprecatedVariables() );
 		}
-		if ( isset( $this->mVars[$variable] ) ) {
-			if ( $this->mVars[$variable] instanceof AFComputedVariable ) {
-				/** @suppress PhanUndeclaredMethod False positive */
-				$value = $this->mVars[$variable]->compute( $this );
-				$this->setVar( $variable, $value );
+		if ( isset( $this->mVars[$varName] ) ) {
+			/** @var $variable AFComputedVariable|AFPData */
+			$variable = $this->mVars[$varName];
+			if ( $variable instanceof AFComputedVariable ) {
+				$value = $variable->compute( $this );
+				$this->setVar( $varName, $value );
 				return $value;
-			} elseif ( $this->mVars[$variable] instanceof AFPData ) {
-				return $this->mVars[$variable];
+			} elseif ( $variable instanceof AFPData ) {
+				return $variable;
 			}
-		} elseif ( array_key_exists( $variable, AbuseFilter::$disabledVars ) ) {
-			wfWarn( "Disabled variable $variable requested. Please fix the filter as this will " .
+		} elseif ( array_key_exists( $varName, AbuseFilter::$disabledVars ) ) {
+			wfWarn( "Disabled variable $varName requested. Please fix the filter as this will " .
 				"be removed soon." );
 		}
-		return new AFPData();
+		return new AFPData( AFPData::DNONE );
 	}
 
 	/**
@@ -91,11 +101,6 @@ class AbuseFilterVariableHolder {
 		}
 	}
 
-	public function __wakeup() {
-		// Reset the context.
-		$this->setVar( 'context', 'stored' );
-	}
-
 	/**
 	 * Export all variables stored in this object as string
 	 *
@@ -104,9 +109,7 @@ class AbuseFilterVariableHolder {
 	public function exportAllVars() {
 		$exported = [];
 		foreach ( array_keys( $this->mVars ) as $varName ) {
-			if ( !in_array( $varName, self::$varBlacklist ) ) {
-				$exported[$varName] = $this->getVar( $varName )->toString();
-			}
+			$exported[$varName] = $this->getVar( $varName )->toString();
 		}
 
 		return $exported;
@@ -120,10 +123,7 @@ class AbuseFilterVariableHolder {
 	public function exportNonLazyVars() {
 		$exported = [];
 		foreach ( $this->mVars as $varName => $data ) {
-			if (
-				!( $data instanceof AFComputedVariable )
-				&& !in_array( $varName, self::$varBlacklist )
-			) {
+			if ( !( $data instanceof AFComputedVariable ) ) {
 				$exported[$varName] = $this->getVar( $varName )->toString();
 			}
 		}
@@ -142,8 +142,6 @@ class AbuseFilterVariableHolder {
 	 * @return array
 	 */
 	public function dumpAllVars( $compute = [], $includeUserVars = false ) {
-		$allVarNames = array_keys( $this->mVars );
-		$exported = [];
 		$coreVariables = [];
 
 		if ( !$includeUserVars ) {
@@ -151,38 +149,27 @@ class AbuseFilterVariableHolder {
 			// to filter user set ones by name
 			global $wgRestrictionTypes;
 
-			$coreVariables = AbuseFilter::getBuilderValues();
-			$coreVariables = array_keys( $coreVariables['vars'] );
+			$activeVariables = array_keys( AbuseFilter::getBuilderValues()['vars'] );
 			$deprecatedVariables = array_keys( AbuseFilter::getDeprecatedVariables() );
-			$coreVariables = array_merge( $coreVariables, $deprecatedVariables );
+			$disabledVariables = array_keys( AbuseFilter::$disabledVars );
+			$coreVariables = array_merge( $activeVariables, $deprecatedVariables, $disabledVariables );
 
-			// Title vars can have several prefixes
-			$prefixes = [ 'MOVED_FROM', 'MOVED_TO', 'PAGE' ];
-			$titleVars = [
-				'_ID',
-				'_NAMESPACE',
-				'_TITLE',
-				'_PREFIXEDTITLE',
-				'_recent_contributors',
-				'_age',
-			];
+			// @todo _restrictions variables should be handled in builderValues as well.
+			$prefixes = [ 'moved_from', 'moved_to', 'page' ];
 			foreach ( $wgRestrictionTypes as $action ) {
-				$titleVars[] = "_restrictions_$action";
-			}
-
-			foreach ( $titleVars as $var ) {
 				foreach ( $prefixes as $prefix ) {
-					$coreVariables[] = $prefix . $var;
+					$coreVariables[] = "{$prefix}_restrictions_$action";
 				}
 			}
+
 			$coreVariables = array_map( 'strtolower', $coreVariables );
 		}
 
-		foreach ( $allVarNames as $varName ) {
+		$exported = [];
+		foreach ( array_keys( $this->mVars ) as $varName ) {
 			if (
 				( $includeUserVars || in_array( strtolower( $varName ), $coreVariables ) ) &&
 				// Only include variables set in the extension in case $includeUserVars is false
-				!in_array( $varName, self::$varBlacklist ) &&
 				( $compute === true ||
 					( is_array( $compute ) && in_array( $varName, $compute ) ) ||
 					$this->mVars[$varName] instanceof AFPData
@@ -206,9 +193,6 @@ class AbuseFilterVariableHolder {
 	/**
 	 * Compute all vars which need DB access. Useful for vars which are going to be saved
 	 * cross-wiki or used for offline analysis.
-	 *
-	 * @suppress PhanUndeclaredProperty for $value->mMethod (phan thinks $value is always AFPData)
-	 * @suppress PhanUndeclaredMethod for $value->compute (phan thinks $value is always AFPData)
 	 */
 	public function computeDBVars() {
 		static $dbTypes = [
@@ -224,10 +208,12 @@ class AbuseFilterVariableHolder {
 			'revision-text-by-timestamp'
 		];
 
-		foreach ( $this->mVars as $name => $value ) {
-			if ( $value instanceof AFComputedVariable &&
-				in_array( $value->mMethod, $dbTypes )
-			) {
+		/** @var AFComputedVariable[] $missingVars */
+		$missingVars = array_filter( $this->mVars, function ( $el ) {
+			return ( $el instanceof AFComputedVariable );
+		} );
+		foreach ( $missingVars as $name => $value ) {
+			if ( in_array( $value->mMethod, $dbTypes ) ) {
 				$value = $value->compute( $this );
 				$this->setVar( $name, $value );
 			}

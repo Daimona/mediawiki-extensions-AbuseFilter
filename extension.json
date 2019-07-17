@@ -2,16 +2,17 @@
 	"name": "Abuse Filter",
 	"author": [
 		"Andrew Garrett",
+		"[https://www.mediawiki.org/wiki/User:Daimona_Eaytoy Daimona Eaytoy]",
+		"Marius Hoch",
 		"River Tarnell",
-		"Victor Vasiliev",
-		"Marius Hoch"
+		"Victor Vasiliev"
 	],
 	"url": "https://www.mediawiki.org/wiki/Extension:AbuseFilter",
 	"descriptionmsg": "abusefilter-desc",
 	"license-name": "GPL-2.0-or-later",
 	"type": "antispam",
 	"requires": {
-		"MediaWiki": ">= 1.33.0"
+		"MediaWiki": ">= 1.34.0"
 	},
 	"AvailableRights": [
 		"abusefilter-modify",
@@ -151,7 +152,9 @@
 		"ApiAbuseFilterEvalExpression": "includes/api/ApiAbuseFilterEvalExpression.php",
 		"ApiAbuseFilterUnblockAutopromote": "includes/api/ApiAbuseFilterUnblockAutopromote.php",
 		"ApiAbuseFilterCheckMatch": "includes/api/ApiAbuseFilterCheckMatch.php",
-		"NormalizeThrottleParameters": "maintenance/normalizeThrottleParameters.php"
+		"NormalizeThrottleParameters": "maintenance/normalizeThrottleParameters.php",
+		"AbuseFilterConsequencesTest": "tests/phpunit/AbuseFilterConsequencesTest.php",
+		"AbuseFilterParserTestCase": "tests/phpunit/AbuseFilterParserTestCase.php"
 	},
 	"ResourceModules": {
 		"ext.abuseFilter": {
@@ -244,10 +247,11 @@
 		"HistoryPageToolLinks": "AbuseFilterHooks::onHistoryPageToolLinks",
 		"UploadVerifyUpload": "AbuseFilterHooks::onUploadVerifyUpload",
 		"UploadStashFile": "AbuseFilterHooks::onUploadStashFile",
-		"MakeGlobalVariablesScript": "AbuseFilterHooks::onMakeGlobalVariablesScript",
 		"PageContentSaveComplete": "AbuseFilterHooks::onPageContentSaveComplete",
 		"UserMergeAccountFields": "AbuseFilterHooks::onUserMergeAccountFields",
-		"ParserOutputStashForEdit": "AbuseFilterHooks::onParserOutputStashForEdit"
+		"ParserOutputStashForEdit": "AbuseFilterHooks::onParserOutputStashForEdit",
+		"UnitTestsAfterDatabaseSetup": "AbuseFilterHooks::onUnitTestsAfterDatabaseSetup",
+		"UnitTestsBeforeDatabaseTeardown": "AbuseFilterHooks::onUnitTestsBeforeDatabaseTeardown"
 	},
 	"config": {
 		"AbuseFilterActions": {
@@ -277,7 +281,7 @@
 				"default": 0.05
 			},
 			"_merge_strategy": "array_plus",
-			"description": "Disable potentially dangerous action of a filter if it matches more than X actions, constituting more than Y% (e.g. 0.05 = 5%) of the last Z actions, and the filter has been modified in the last S seconds. X is AbuseFilterEmergencyDisableCount, Y is AbuseFilterEmergencyDisableThreshold, S is AbuseFilterEmergencyDisableAge and Z is a number between 1 and AbuseFilterProfileActionsCap."
+			"description": "Disable potentially dangerous actions (AbuseFilterRestrictions) of a filter if it matches more than X actions, constituting more than Y% (e.g. 0.05 = 5%) of the last Z actions, and the filter has been modified in the last S seconds. X is AbuseFilterEmergencyDisableCount, Y is AbuseFilterEmergencyDisableThreshold, S is AbuseFilterEmergencyDisableAge and Z is a number between 1 and AbuseFilterProfileActionsCap."
 		},
 		"AbuseFilterEmergencyDisableCount": {
 			"value": {
@@ -317,7 +321,7 @@
 		},
 		"AbuseFilterCentralDB": {
 			"value": null,
-			"description": "Name of a database where global abuse filters will be stored in"
+			"description": "Name of a database where global abuse filters will be stored in. To use a DB with prefixed tables, set this to \"{$databaseName}-{$prefix}\"."
 		},
 		"AbuseFilterIsCentral": {
 			"value": false,
@@ -360,14 +364,6 @@
 		"AbuseFilterLogIPMaxAge": {
 			"value": 7776000,
 			"description": "Age used as cutoff when purging old IP log data, defaults to 3 months. Used by maintenance script purgeOldLogIPData.php"
-		},
-		"AbuseFilterProfile": {
-			"value": false,
-			"description": "Whether to record the average time taken and average number of conditions used by each filter."
-		},
-		"AbuseFilterRuntimeProfile": {
-			"value": false,
-			"description": "Whether to record runtime metrics for all filters combined."
 		},
 		"AbuseFilterSlowFilterRuntimeLimit": {
 			"value": 500,

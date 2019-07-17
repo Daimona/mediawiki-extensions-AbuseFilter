@@ -6,21 +6,26 @@ use MediaWiki\MediaWikiServices;
 use MediaWiki\Revision\MutableRevisionRecord;
 use MediaWiki\Revision\SlotRecord;
 use Wikimedia\Rdbms\Database;
+use Wikimedia\Rdbms\IMaintainableDatabase;
 
 class AbuseFilterHooks {
 	const FETCH_ALL_TAGS_KEY = 'abusefilter-fetch-all-tags';
 
-	/** @var AbuseFilterVariableHolder|bool */
-	public static $successful_action_vars = false;
-	/** @var WikiPage|Article|bool|null Make sure edit filter & edit save hooks match */
-	public static $last_edit_page = false;
-	// So far, all of the error message out-params for these hooks accept HTML.
+	/** @var WikiPage|null Make sure edit filter & edit save hooks match */
+	private static $lastEditPage = null;
 
 	/**
 	 * Called right after configuration has been loaded.
 	 */
 	public static function onRegistration() {
-		global $wgAuthManagerAutoConfig, $wgActionFilteredLogs;
+		global $wgAuthManagerAutoConfig, $wgActionFilteredLogs, $wgAbuseFilterProfile,
+			$wgAbuseFilterProfiling;
+
+		// @todo Remove this in a future release (added in 1.33)
+		if ( isset( $wgAbuseFilterProfile ) || isset( $wgAbuseFilterProfiling ) ) {
+			wfWarn( '$wgAbuseFilterProfile and $wgAbuseFilterProfiling have been removed and ' .
+				'profiling is now enabled by default.' );
+		}
 
 		$wgAuthManagerAutoConfig['preauth'][AbuseFilterPreAuthenticationProvider::class] = [
 			'class' => AbuseFilterPreAuthenticationProvider::class,
@@ -75,20 +80,20 @@ class AbuseFilterHooks {
 		Status $status, $summary, $slot = SlotRecord::MAIN
 	) {
 		$title = $context->getTitle();
-		if ( !$title ) {
-			// T144265
+		if ( $title === null ) {
+			// T144265: This *should* never happen.
 			$logger = LoggerFactory::getInstance( 'AbuseFilter' );
-			$logger->warning( __METHOD__ . ' received a null title. (T144265)' );
+			$logger->warning( __METHOD__ . ' received a null title.' );
+			return Status::newGood();
 		}
 
-		self::$successful_action_vars = false;
-		self::$last_edit_page = false;
+		self::$lastEditPage = null;
 
 		$user = $context->getUser();
 
 		$oldContent = null;
 
-		if ( ( $title instanceof Title ) && $title->canExist() && $title->exists() ) {
+		if ( $title->canExist() && $title->exists() ) {
 			// Make sure we load the latest text saved in database (bug 31656)
 			$page = $context->getWikiPage();
 			$oldRevision = $page->getRevision();
@@ -116,7 +121,7 @@ class AbuseFilterHooks {
 				if ( $content->equals( $oldContent ) ) {
 					return Status::newGood();
 				}
-			} elseif ( strcmp( $oldAfText, $text ) == 0 ) {
+			} elseif ( strcmp( $oldAfText, $text ) === 0 ) {
 				// Otherwise, compare strings
 				return Status::newGood();
 			}
@@ -137,8 +142,7 @@ class AbuseFilterHooks {
 			return $filter_result;
 		}
 
-		self::$successful_action_vars = $vars;
-		self::$last_edit_page = $page;
+		self::$lastEditPage = $page;
 
 		return Status::newGood();
 	}
@@ -162,7 +166,7 @@ class AbuseFilterHooks {
 		$vars = new AbuseFilterVariableHolder();
 		$vars->addHolders(
 			AbuseFilter::generateUserVars( $user ),
-			AbuseFilter::generateTitleVars( $title, 'PAGE' )
+			AbuseFilter::generateTitleVars( $title, 'page' )
 		);
 		$vars->setVar( 'action', 'edit' );
 		$vars->setVar( 'summary', $summary );
@@ -198,8 +202,7 @@ class AbuseFilterHooks {
 			$warning = $warning->inContentLanguage();
 		}
 
-		$filterDescription = $params[0];
-		$filter = $params[1];
+		list( $filterDescription, $filter ) = $params;
 
 		// The value is a nested structure keyed by filter id, which doesn't make sense when we only
 		// return the result from one filter. Flatten it to a plain array of actions.
@@ -243,67 +246,37 @@ class AbuseFilterHooks {
 		WikiPage $wikiPage, User $user, $content, $summary, $minoredit, $watchthis, $sectionanchor,
 		$flags, Revision $revision, Status $status, $baseRevId
 	) {
-		if ( !self::$successful_action_vars || !$revision ) {
-			self::$successful_action_vars = false;
-			return;
-		}
-
-		/** @var AbuseFilterVariableHolder|bool $vars */
-		$vars = self::$successful_action_vars;
-
-		if ( $vars->getVar( 'page_prefixedtitle' )->toString() !==
-			$wikiPage->getTitle()->getPrefixedText()
+		$curTitle = $wikiPage->getTitle()->getPrefixedText();
+		if ( !isset( AbuseFilter::$logIds[ $curTitle ] ) || !$revision ||
+			$wikiPage !== self::$lastEditPage
 		) {
+			// This isn't the edit AbuseFilter::$logIds was set for
+			AbuseFilter::$logIds = [];
 			return;
 		}
 
-		if ( !self::identicalPageObjects( $wikiPage, self::$last_edit_page ) ) {
-			// This isn't the edit $successful_action_vars was set for
-			return;
-		}
-		self::$last_edit_page = false;
+		self::$lastEditPage = null;
 
-		if ( $vars->getVar( 'local_log_ids' ) ) {
+		$logs = AbuseFilter::$logIds[ $curTitle ];
+		if ( $logs[ 'local' ] ) {
 			// Now actually do our storage
-			$log_ids = $vars->getVar( 'local_log_ids' )->toNative();
 			$dbw = wfGetDB( DB_MASTER );
 
-			if ( $log_ids !== null && count( $log_ids ) ) {
-				$dbw->update( 'abuse_filter_log',
-					[ 'afl_rev_id' => $revision->getId() ],
-					[ 'afl_id' => $log_ids ],
-					__METHOD__
-				);
-			}
+			$dbw->update( 'abuse_filter_log',
+				[ 'afl_rev_id' => $revision->getId() ],
+				[ 'afl_id' => $logs['local'] ],
+				__METHOD__
+			);
 		}
 
-		if ( $vars->getVar( 'global_log_ids' ) ) {
-			$log_ids = $vars->getVar( 'global_log_ids' )->toNative();
-
-			if ( $log_ids !== null && count( $log_ids ) ) {
-				global $wgAbuseFilterCentralDB;
-				$fdb = wfGetDB( DB_MASTER, [], $wgAbuseFilterCentralDB );
-
-				$fdb->update( 'abuse_filter_log',
-					[ 'afl_rev_id' => $revision->getId() ],
-					[ 'afl_id' => $log_ids, 'afl_wiki' => wfWikiID() ],
-					__METHOD__
-				);
-			}
+		if ( $logs[ 'global' ] ) {
+			$fdb = AbuseFilter::getCentralDB( DB_MASTER );
+			$fdb->update( 'abuse_filter_log',
+				[ 'afl_rev_id' => $revision->getId() ],
+				[ 'afl_id' => $logs['global'], 'afl_wiki' => wfWikiID() ],
+				__METHOD__
+			);
 		}
-	}
-
-	/**
-	 * Check if two article objects are identical or have an identical WikiPage
-	 * @param Article|WikiPage $page1
-	 * @param Article|WikiPage $page2
-	 * @return bool
-	 */
-	protected static function identicalPageObjects( $page1, $page2 ) {
-		$wpage1 = ( $page1 instanceof Article ) ? $page1->getPage() : $page1;
-		$wpage2 = ( $page2 instanceof Article ) ? $page2->getPage() : $page2;
-
-		return $wpage1 === $wpage2;
 	}
 
 	/**
@@ -317,7 +290,7 @@ class AbuseFilterHooks {
 				$key,
 				30,
 				function () use ( $key ) {
-					return (int)ObjectCache::getMainStashInstance()->get( $key );
+					return (int)MediaWikiServices::getInstance()->getMainObjectStash()->get( $key );
 				}
 			);
 
@@ -347,8 +320,8 @@ class AbuseFilterHooks {
 			AbuseFilter::generateTitleVars( $oldTitle, 'MOVED_FROM' ),
 			AbuseFilter::generateTitleVars( $newTitle, 'MOVED_TO' )
 		);
-		$vars->setVar( 'SUMMARY', $reason );
-		$vars->setVar( 'ACTION', 'move' );
+		$vars->setVar( 'summary', $reason );
+		$vars->setVar( 'action', 'move' );
 
 		$result = AbuseFilter::filterAction( $vars, $oldTitle, 'default', $user );
 		$status->merge( $result );
@@ -368,11 +341,11 @@ class AbuseFilterHooks {
 
 		$vars->addHolders(
 			AbuseFilter::generateUserVars( $user ),
-			AbuseFilter::generateTitleVars( $article->getTitle(), 'PAGE' )
+			AbuseFilter::generateTitleVars( $article->getTitle(), 'page' )
 		);
 
-		$vars->setVar( 'SUMMARY', $reason );
-		$vars->setVar( 'ACTION', 'delete' );
+		$vars->setVar( 'summary', $reason );
+		$vars->setVar( 'action', 'delete' );
 
 		$filter_result = AbuseFilter::filterAction( $vars, $article->getTitle(), 'default', $user );
 
@@ -390,11 +363,20 @@ class AbuseFilterHooks {
 			$recentChange->getAttribute( 'rc_namespace' ),
 			$recentChange->getAttribute( 'rc_title' )
 		);
-		$action = $recentChange->getAttribute( 'rc_log_type' ) ?
-			$recentChange->getAttribute( 'rc_log_type' ) : 'edit';
-		$actionID = implode( '-', [
-			$title->getPrefixedText(), $recentChange->getAttribute( 'rc_user_text' ), $action
-		] );
+
+		$logType = $recentChange->getAttribute( 'rc_log_type' ) ?: 'edit';
+		if ( $logType === 'newusers' ) {
+			$action = $recentChange->getAttribute( 'rc_log_action' ) === 'autocreate' ?
+				'autocreateaccount' :
+				'createaccount';
+		} else {
+			$action = $logType;
+		}
+		$actionID = AbuseFilter::getTaggingActionId(
+			$action,
+			$title,
+			$recentChange->getAttribute( 'rc_user_text' )
+		);
 
 		if ( isset( AbuseFilter::$tagsToSet[$actionID] ) ) {
 			$recentChange->addTags( AbuseFilter::$tagsToSet[$actionID] );
@@ -432,10 +414,8 @@ class AbuseFilterHooks {
 		$tags = $cache->getWithSetCallback(
 			// Key to store the cached value under
 			$cache->makeKey( self::FETCH_ALL_TAGS_KEY, (int)$enabled ),
-
 			// Time-to-live (in seconds)
 			$cache::TTL_MINUTE,
-
 			// Function that derives the new key value
 			function ( $oldValue, &$ttl, array &$setOpts ) use ( $enabled, $tags, $fname ) {
 				global $wgAbuseFilterCentralDB, $wgAbuseFilterIsCentral;
@@ -466,12 +446,11 @@ class AbuseFilterHooks {
 				}
 
 				if ( $wgAbuseFilterCentralDB && !$wgAbuseFilterIsCentral ) {
-					$dbr = wfGetDB( DB_REPLICA, [], $wgAbuseFilterCentralDB );
-					$where['af_global'] = 1;
+					$dbr = AbuseFilter::getCentralDB( DB_REPLICA );
 					$res = $dbr->select(
 						[ 'abuse_filter_action', 'abuse_filter' ],
 						'afa_parameters',
-						$where,
+						[ 'af_global' => 1 ] + $where,
 						$fname,
 						[],
 						[ 'abuse_filter' => [ 'INNER JOIN', 'afa_filter=af_id' ] ]
@@ -512,8 +491,8 @@ class AbuseFilterHooks {
 	public static function onLoadExtensionSchemaUpdates( DatabaseUpdater $updater ) {
 		$dir = dirname( __DIR__ );
 
-		if ( $updater->getDB()->getType() == 'mysql' || $updater->getDB()->getType() == 'sqlite' ) {
-			if ( $updater->getDB()->getType() == 'mysql' ) {
+		if ( $updater->getDB()->getType() === 'mysql' || $updater->getDB()->getType() === 'sqlite' ) {
+			if ( $updater->getDB()->getType() === 'mysql' ) {
 				$updater->addExtensionUpdate( [ 'addTable', 'abuse_filter',
 					"$dir/abusefilter.tables.sql", true ] );
 				$updater->addExtensionUpdate( [ 'addTable', 'abuse_filter_history',
@@ -536,7 +515,7 @@ class AbuseFilterHooks {
 				"$dir/db_patches/patch-global_filters.sql", true ] );
 			$updater->addExtensionUpdate( [ 'addField', 'abuse_filter_log', 'afl_rev_id',
 				"$dir/db_patches/patch-afl_action_id.sql", true ] );
-			if ( $updater->getDB()->getType() == 'mysql' ) {
+			if ( $updater->getDB()->getType() === 'mysql' ) {
 				$updater->addExtensionUpdate( [ 'addIndex', 'abuse_filter_log',
 					'filter_timestamp', "$dir/db_patches/patch-fix-indexes.sql", true ] );
 			} else {
@@ -549,42 +528,33 @@ class AbuseFilterHooks {
 			$updater->addExtensionUpdate( [ 'addField', 'abuse_filter',
 				'af_group', "$dir/db_patches/patch-af_group.sql", true ] );
 
-			if ( $updater->getDB()->getType() == 'mysql' ) {
+			if ( $updater->getDB()->getType() === 'mysql' ) {
 				$updater->addExtensionUpdate( [
 					'addIndex', 'abuse_filter_log', 'wiki_timestamp',
 					"$dir/db_patches/patch-global_logging_wiki-index.sql", true
+				] );
+				$updater->addExtensionUpdate( [
+					'modifyField', 'abuse_filter_log', 'afl_namespace',
+					"$dir/db_patches/patch-afl-namespace_int.sql", true
 				] );
 			} else {
 				$updater->addExtensionUpdate( [
 					'addIndex', 'abuse_filter_log', 'afl_wiki_timestamp',
 					"$dir/db_patches/patch-global_logging_wiki-index.sqlite.sql", true
 				] );
-			}
-
-			if ( $updater->getDB()->getType() == 'mysql' ) {
 				$updater->addExtensionUpdate( [
 					'modifyField', 'abuse_filter_log', 'afl_namespace',
-					"$dir/db_patches/patch-afl-namespace_int.sql", true
+					"$dir/db_patches/patch-afl-namespace_int.sqlite.sql", true
 				] );
-			} else {
-				/*
-				$updater->addExtensionUpdate( array(
-					'modifyField',
-					'abuse_filter_log',
-					'afl_namespace',
-					"$dir/db_patches/patch-afl-namespace_int.sqlite.sql",
-					true
-				) );
-				 */
-				/* @todo Modify a column in sqlite, which do not support such
-				 * things create backup, drop, create with new schema, copy,
-				 * drop backup or simply see
-				 * https://www.mediawiki.org/wiki/Manual:SQLite#About_SQLite :
-				 * Several extensions are known to have database update or
-				 * installation issues with SQLite: AbuseFilter, ...
-				 */
 			}
-		} elseif ( $updater->getDB()->getType() == 'postgres' ) {
+			if ( $updater->getDB()->getType() === 'mysql' ) {
+				$updater->addExtensionUpdate( [ 'dropField', 'abuse_filter_log',
+					'afl_log_id', "$dir/db_patches/patch-drop_afl_log_id.sql", true ] );
+			} else {
+				$updater->addExtensionUpdate( [ 'dropField', 'abuse_filter_log',
+					'afl_log_id', "$dir/db_patches/patch-drop_afl_log_id.sqlite.sql", true ] );
+			}
+		} elseif ( $updater->getDB()->getType() === 'postgres' ) {
 			$updater->addExtensionUpdate( [
 				'addTable', 'abuse_filter', "$dir/abusefilter.tables.pg.sql", true ] );
 			$updater->addExtensionUpdate( [
@@ -617,8 +587,6 @@ class AbuseFilterHooks {
 				'addPgField', 'abuse_filter_log', 'afl_patrolled_by', 'INTEGER' ] );
 			$updater->addExtensionUpdate( [
 				'addPgField', 'abuse_filter_log', 'afl_rev_id', 'INTEGER' ] );
-			$updater->addExtensionUpdate( [
-				'addPgField', 'abuse_filter_log', 'afl_log_id', 'INTEGER' ] );
 			$updater->addExtensionUpdate( [
 				'changeField', 'abuse_filter_log', 'afl_filter', 'TEXT', '' ] );
 			$updater->addExtensionUpdate( [
@@ -656,16 +624,15 @@ class AbuseFilterHooks {
 				'(afl_rev_id)'
 			] );
 			$updater->addExtensionUpdate( [
-				'addPgExtIndex', 'abuse_filter_log', 'abuse_filter_log_log_id',
-				'(afl_log_id)'
-			] );
-			$updater->addExtensionUpdate( [
 				'addPgExtIndex', 'abuse_filter_log', 'abuse_filter_log_wiki_timestamp',
 				'(afl_wiki,afl_timestamp)'
 			] );
+			$updater->addExtensionUpdate( [
+				'dropPgField', 'abuse_filter_log', 'afl_log_id' ] );
 		}
 
 		$updater->addExtensionUpdate( [ [ __CLASS__, 'createAbuseFilterUser' ] ] );
+		$updater->addPostDatabaseUpdateMaintenance( 'NormalizeThrottleParameters' );
 	}
 
 	/**
@@ -730,14 +697,14 @@ class AbuseFilterHooks {
 	 *
 	 * @param UploadBase $upload
 	 * @param User $user
-	 * @param array $props
+	 * @param array|null $props
 	 * @param string $comment
 	 * @param string $pageText
 	 * @param array|ApiMessage &$error
 	 * @return bool
 	 */
 	public static function onUploadVerifyUpload( UploadBase $upload, User $user,
-		array $props, $comment, $pageText, &$error
+		$props, $comment, $pageText, &$error
 	) {
 		return self::filterUpload( 'upload', $upload, $user, $props, $comment, $pageText, $error );
 	}
@@ -765,45 +732,49 @@ class AbuseFilterHooks {
 	 * @param string $action 'upload' or 'stashupload'
 	 * @param UploadBase $upload
 	 * @param User $user User performing the action
-	 * @param array $props File properties, as returned by FSFile::getPropsFromPath()
+	 * @param array|null $props File properties, as returned by MWFileProps::getPropsFromPath().
 	 * @param string|null $summary Upload log comment (also used as edit summary)
 	 * @param string|null $text File description page text (only used for new uploads)
 	 * @param array|ApiMessage &$error
 	 * @return bool
 	 */
 	public static function filterUpload( $action, UploadBase $upload, User $user,
-		array $props, $summary, $text, &$error
+		$props, $summary, $text, &$error
 	) {
 		$title = $upload->getTitle();
-		if ( !$title ) {
-			// T144265
+		if ( $title === null ) {
+			// T144265: This could happen for 'stashupload' if the specified title is invalid.
+			// Let UploadBase warn the user about that, and we'll filter later.
 			$logger = LoggerFactory::getInstance( 'AbuseFilter' );
-			$err = $upload->validateName()['status'];
-			$logger->warning( __METHOD__ . ' received a null title.' .
-				"Action: $action. Title error: $err. (T144265)"
+			$logger->warning( __METHOD__ . " received a null title. Action: $action." );
+			return true;
+		}
+
+		$mimeAnalyzer = MediaWikiServices::getInstance()->getMimeAnalyzer();
+		if ( !$props ) {
+			$props = ( new MWFileProps( $mimeAnalyzer ) )->getPropsFromPath(
+				$upload->getTempPath(),
+				true
 			);
 		}
 
 		$vars = new AbuseFilterVariableHolder;
 		$vars->addHolders(
 			AbuseFilter::generateUserVars( $user ),
-			AbuseFilter::generateTitleVars( $title, 'PAGE' )
+			AbuseFilter::generateTitleVars( $title, 'page' )
 		);
-		$vars->setVar( 'ACTION', $action );
+		$vars->setVar( 'action', $action );
 
 		// We use the hexadecimal version of the file sha1.
 		// Use UploadBase::getTempFileSha1Base36 so that we don't have to calculate the sha1 sum again
 		$sha1 = Wikimedia\base_convert( $upload->getTempFileSha1Base36(), 36, 16, 40 );
 
+		// This is the same as AbuseFilter::getUploadVarsFromRCRow, but from a different source
 		$vars->setVar( 'file_sha1', $sha1 );
 		$vars->setVar( 'file_size', $upload->getFileSize() );
 
 		$vars->setVar( 'file_mime', $props['mime'] );
-		$vars->setVar(
-			'file_mediatype',
-			MediaWiki\MediaWikiServices::getInstance()->getMimeAnalyzer()
-				->getMediaType( null, $props['mime'] )
-		);
+		$vars->setVar( 'file_mediatype', $mimeAnalyzer->getMediaType( null, $props['mime'] ) );
 		$vars->setVar( 'file_width', $props['width'] );
 		$vars->setVar( 'file_height', $props['height'] );
 		$vars->setVar( 'file_bits_per_channel', $props['bits'] );
@@ -853,24 +824,6 @@ class AbuseFilterHooks {
 		}
 
 		return $filter_result->isOK();
-	}
-
-	/**
-	 * Adds global variables to the Javascript as needed
-	 *
-	 * @param array &$vars
-	 */
-	public static function onMakeGlobalVariablesScript( array &$vars ) {
-		if ( isset( AbuseFilter::$editboxName ) ) {
-			$vars['abuseFilterBoxName'] = AbuseFilter::$editboxName;
-		}
-
-		if ( AbuseFilterViewExamine::$examineType !== null ) {
-			$vars['abuseFilterExamine'] = [
-				'type' => AbuseFilterViewExamine::$examineType,
-				'id' => AbuseFilterViewExamine::$examineId,
-			];
-		}
 	}
 
 	/**
@@ -927,5 +880,45 @@ class AbuseFilterHooks {
 			},
 			DeferredUpdates::PRESEND
 		);
+	}
+
+	/**
+	 * Setup tables to emulate global filters, used in AbuseFilterConsequencesTest.
+	 *
+	 * @param IMaintainableDatabase $db
+	 * @param string $prefix The prefix used in unit tests
+	 * @suppress PhanUndeclaredClassConstant AbuseFilterConsequencesTest is in AutoloadClasses
+	 * @suppress PhanUndeclaredClassStaticProperty AbuseFilterConsequencesTest is in AutoloadClasses
+	 */
+	public static function onUnitTestsAfterDatabaseSetup( IMaintainableDatabase $db, $prefix ) {
+		$externalPrefix = AbuseFilterConsequencesTest::DB_EXTERNAL_PREFIX;
+		if ( $db->tableExists( $externalPrefix . AbuseFilterConsequencesTest::$externalTables[0] ) ) {
+			// Check a random table to avoid unnecessary table creations. See T155147.
+			return;
+		}
+
+		foreach ( AbuseFilterConsequencesTest::$externalTables as $table ) {
+			// Don't create them as temporary, as we'll access the DB via another connection
+			$db->duplicateTableStructure(
+				"$prefix$table",
+				"$prefix$externalPrefix$table",
+				false,
+				__METHOD__
+			);
+		}
+	}
+
+	/**
+	 * Drop tables used for global filters in AbuseFilterConsequencesTest.
+	 *   Note: this has the same problem as T201290.
+	 *
+	 * @suppress PhanUndeclaredClassConstant AbuseFilterConsequencesTest is in AutoloadClasses
+	 * @suppress PhanUndeclaredClassStaticProperty AbuseFilterConsequencesTest is in AutoloadClasses
+	 */
+	public static function onUnitTestsBeforeDatabaseTeardown() {
+		$db = wfGetDB( DB_MASTER );
+		foreach ( AbuseFilterConsequencesTest::$externalTables as $table ) {
+			$db->dropTable( AbuseFilterConsequencesTest::DB_EXTERNAL_PREFIX . $table );
+		}
 	}
 }

@@ -1,9 +1,21 @@
 <?php
 
 class AbuseFilterViewDiff extends AbuseFilterView {
+	/**
+	 * @var array|null The old version of the filter
+	 */
 	public $mOldVersion = null;
+	/**
+	 * @var array|null The new version of the filter
+	 */
 	public $mNewVersion = null;
+	/**
+	 * @var int|null The history ID of the next version, if any
+	 */
 	public $mNextHistoryId = null;
+	/**
+	 * @var int|null The ID of the filter
+	 */
 	public $mFilter = null;
 
 	/**
@@ -84,6 +96,11 @@ class AbuseFilterViewDiff extends AbuseFilterView {
 		$oldSpec = $this->mParams[3];
 		$newSpec = $this->mParams[4];
 		$this->mFilter = $this->mParams[1];
+
+		if ( !is_numeric( $this->mFilter ) ) {
+			$this->getOutput()->addWikiMsg( 'abusefilter-diff-invalid' );
+			return false;
+		}
 
 		if ( AbuseFilter::filterHidden( $this->mFilter )
 			&& !$this->getUser()->isAllowedAny( 'abusefilter-modify', 'abusefilter-view-private' )
@@ -166,7 +183,7 @@ class AbuseFilterViewDiff extends AbuseFilterView {
 				[ 'afh_id' => $spec, 'afh_filter' => $this->mFilter ],
 				__METHOD__
 			);
-		} elseif ( $spec == 'cur' ) {
+		} elseif ( $spec === 'cur' ) {
 			$row = $dbr->selectRow(
 				'abuse_filter_history',
 				$selectFields,
@@ -174,7 +191,9 @@ class AbuseFilterViewDiff extends AbuseFilterView {
 				__METHOD__,
 				[ 'ORDER BY' => 'afh_timestamp desc' ]
 			);
-		} elseif ( ( $spec == 'prev' || $spec == 'next' ) && !in_array( $otherSpec, $dependentSpecs ) ) {
+		} elseif ( ( $spec === 'prev' || $spec === 'next' ) &&
+			!in_array( $otherSpec, $dependentSpecs )
+		) {
 			// cached
 			$other = $this->loadSpec( $otherSpec, $spec );
 
@@ -301,7 +320,7 @@ class AbuseFilterViewDiff extends AbuseFilterView {
 		);
 		if (
 			count( $this->getConfig()->get( 'AbuseFilterValidGroups' ) ) > 1 ||
-			$oldVersion['info']['group'] != $newVersion['info']['group']
+			$oldVersion['info']['group'] !== $newVersion['info']['group']
 		) {
 			$info .= $this->getDiffRow(
 				'abusefilter-edit-group',
@@ -311,8 +330,8 @@ class AbuseFilterViewDiff extends AbuseFilterView {
 		}
 		$info .= $this->getDiffRow(
 			'abusefilter-edit-flags',
-			AbuseFilter::formatFlags( $oldVersion['info']['flags'] ),
-			AbuseFilter::formatFlags( $newVersion['info']['flags'] )
+			AbuseFilter::formatFlags( $oldVersion['info']['flags'], $this->getLanguage() ),
+			AbuseFilter::formatFlags( $newVersion['info']['flags'], $this->getLanguage() )
 		);
 
 		$info .= $this->getDiffRow(
@@ -325,7 +344,6 @@ class AbuseFilterViewDiff extends AbuseFilterView {
 			$body .= $infoHeader . $info;
 		}
 
-		// Pattern
 		$patternHeader = $this->getHeaderRow( 'abusefilter-diff-pattern' );
 		$pattern = '';
 		$pattern .= $this->getDiffRow(
@@ -338,7 +356,6 @@ class AbuseFilterViewDiff extends AbuseFilterView {
 			$body .= $patternHeader . $pattern;
 		}
 
-		// Actions
 		$actionsHeader = $this->getHeaderRow( 'abusefilter-edit-consequences' );
 		$actions = '';
 
@@ -374,7 +391,7 @@ class AbuseFilterViewDiff extends AbuseFilterView {
 
 		ksort( $actions );
 		foreach ( $actions as $action => $parameters ) {
-			$lines[] = AbuseFilter::formatAction( $action, $parameters );
+			$lines[] = AbuseFilter::formatAction( $action, $parameters, $this->getLanguage() );
 		}
 
 		if ( !count( $lines ) ) {

@@ -2,37 +2,61 @@
 
 class SpecialAbuseLog extends SpecialPage {
 	/**
-	 * @var User
+	 * @var User The user whose AbuseLog entries are being searched
 	 */
 	protected $mSearchUser;
 
+	/**
+	 * @var string The start time of the search period
+	 */
 	protected $mSearchPeriodStart;
 
+	/**
+	 * @var string The end time of the search period
+	 */
 	protected $mSearchPeriodEnd;
 
 	/**
-	 * @var Title
+	 * @var Title The page of which AbuseLog entries are being searched
 	 */
 	protected $mSearchTitle;
 
 	/**
-	 * @var string
+	 * @var string The action performed by the user
 	 */
 	protected $mSearchAction;
 
 	/**
-	 * @var string
+	 * @var string The action taken by AbuseFilter
 	 */
 	protected $mSearchActionTaken;
 
+	/**
+	 * @var string The wiki name where we're performing the search
+	 */
 	protected $mSearchWiki;
 
+	/**
+	 * @var string|null The filter IDs we're looking for. Either a single one, or a pipe-separated list
+	 */
 	protected $mSearchFilter;
 
+	/**
+	 * @var string The visibility of entries we're interested in
+	 */
 	protected $mSearchEntries;
 
+	/**
+	 * @var string The impact of the user action, i.e. if the change has been saved
+	 */
 	protected $mSearchImpact;
 
+	/** @var string The filter group to search, as defined in $wgAbuseFilterValidGroups */
+	protected $mSearchGroup;
+
+	/**
+	 * @inheritDoc
+	 */
 	public function __construct() {
 		parent::__construct( 'AbuseLog', 'abusefilter-log' );
 	}
@@ -66,7 +90,7 @@ class SpecialAbuseLog extends SpecialPage {
 	 * used as the identifier of the log entry that we want to hide; otherwise,
 	 * the abuse logs are shown as a list, with a search form above the list.
 	 *
-	 * @param string $parameter URL parameters
+	 * @param string|null $parameter URL parameters
 	 */
 	public function execute( $parameter ) {
 		$out = $this->getOutput();
@@ -76,7 +100,7 @@ class SpecialAbuseLog extends SpecialPage {
 			$this->getContext(), 'log', $this->getLinkRenderer() );
 
 		$this->setHeaders();
-		$this->outputHeader( 'abusefilter-log-summary' );
+		$this->addHelpLink( 'Extension:AbuseFilter' );
 		$this->loadParameters();
 
 		$out->setPageTitle( $this->msg( 'abusefilter-log' ) );
@@ -86,14 +110,7 @@ class SpecialAbuseLog extends SpecialPage {
 
 		$out->addModuleStyles( 'ext.abuseFilter' );
 
-		// Are we allowed?
-		$errors = $this->getPageTitle()->getUserPermissionsErrors(
-			'abusefilter-log', $this->getUser(), true, [ 'ns-specialprotected' ] );
-		if ( count( $errors ) ) {
-			$out->showPermissionsErrorPage( $errors, 'abusefilter-log' );
-
-			return;
-		}
+		$this->checkPermissions();
 
 		$hideid = $request->getIntOrNull( 'hide' );
 		$args = explode( '/', $parameter );
@@ -132,6 +149,9 @@ class SpecialAbuseLog extends SpecialPage {
 		$this->mSearchPeriodStart = $request->getText( 'wpSearchPeriodStart' );
 		$this->mSearchPeriodEnd = $request->getText( 'wpSearchPeriodEnd' );
 		$this->mSearchTitle = $request->getText( 'wpSearchTitle' );
+		if ( count( $this->getConfig()->get( 'AbuseFilterValidGroups' ) ) > 1 ) {
+			$this->mSearchGroup = $request->getText( 'wpSearchGroup' );
+		}
 		$this->mSearchFilter = null;
 		$this->mSearchAction = $request->getText( 'wpSearchAction' );
 		$this->mSearchActionTaken = $request->getText( 'wpSearchActionTaken' );
@@ -243,6 +263,20 @@ class SpecialAbuseLog extends SpecialPage {
 				],
 			];
 		}
+
+		$groups = $this->getConfig()->get( 'AbuseFilterValidGroups' );
+		if ( count( $groups ) > 1 ) {
+			$options = array_merge(
+				[ $this->msg( 'abusefilter-log-search-group-any' )->text() => 0 ],
+				array_combine( $groups, $groups )
+			);
+			$formDescriptor['SearchGroup'] = [
+				'label-message' => 'abusefilter-log-search-group',
+				'type' => 'select',
+				'options' => $options
+			];
+		}
+
 		if ( self::canSeeDetails() ) {
 			$formDescriptor['SearchFilter'] = [
 				'label-message' => 'abusefilter-log-search-filter',
@@ -251,7 +285,7 @@ class SpecialAbuseLog extends SpecialPage {
 			];
 		}
 		if ( $this->getConfig()->get( 'AbuseFilterIsCentral' ) ) {
-			// Add free form input for wiki name. Would be nice to generate
+			// @todo Add free form input for wiki name. Would be nice to generate
 			// a select with unique names in the db at some point.
 			$formDescriptor['SearchWiki'] = [
 				'label-message' => 'abusefilter-log-search-wiki',
@@ -281,16 +315,15 @@ class SpecialAbuseLog extends SpecialPage {
 
 		$dbr = wfGetDB( DB_REPLICA );
 
-		$row = $dbr->selectRow(
-			[ 'abuse_filter_log', 'abuse_filter' ],
+		$deleted = $dbr->selectField(
+			'abuse_filter_log',
 			'afl_deleted',
 			[ 'afl_id' => $id ],
-			__METHOD__,
-			[],
-			[ 'abuse_filter' => [ 'LEFT JOIN', 'af_id=afl_filter' ] ]
+			__METHOD__
 		);
 
-		if ( !$row ) {
+		if ( $deleted === false ) {
+			$output->addWikiMsg( 'abusefilter-log-nonexistent' );
 			return;
 		}
 
@@ -315,7 +348,7 @@ class SpecialAbuseLog extends SpecialPage {
 			],
 			'hidden' => [
 				'type' => 'toggle',
-				'default' => $row->afl_deleted,
+				'default' => $deleted,
 				'label-message' => 'abusefilter-log-hide-hidden',
 			],
 		];
@@ -374,6 +407,7 @@ class SpecialAbuseLog extends SpecialPage {
 	 */
 	public function showList() {
 		$out = $this->getOutput();
+		$this->outputHeader( 'abusefilter-log-summary' );
 
 		// Generate conditions list.
 		$conds = [];
@@ -402,24 +436,57 @@ class SpecialAbuseLog extends SpecialPage {
 		}
 
 		if ( $this->mSearchWiki ) {
-			if ( $this->mSearchWiki == wfWikiID() ) {
+			if ( $this->mSearchWiki === wfWikiID() ) {
 				$conds['afl_wiki'] = null;
 			} else {
 				$conds['afl_wiki'] = $this->mSearchWiki;
 			}
 		}
 
+		$groupFilters = [];
+		if ( $this->mSearchGroup ) {
+			$groupFilters = $dbr->selectFieldValues(
+				'abuse_filter',
+				'af_id',
+				[ 'af_group' => $this->mSearchGroup ],
+				__METHOD__
+			);
+		}
+
+		$searchFilters = [];
 		if ( $this->mSearchFilter ) {
-			$searchFilters = array_map( 'trim', explode( '|', $this->mSearchFilter ) );
+			$rawFilters = array_map( 'trim', explode( '|', $this->mSearchFilter ) );
+			// Map of [ [ id, global ], ... ]
+			$filtersList = [];
+			$foundInvalid = false;
+			foreach ( $rawFilters as $filter ) {
+				try {
+					$filtersList[] = AbuseFilter::splitGlobalName( $filter );
+				} catch ( InvalidArgumentException $e ) {
+					$foundInvalid = true;
+					continue;
+				}
+			}
+
+			if ( $foundInvalid ) {
+				$out->addHTML(
+					Html::rawElement(
+						'p',
+						[],
+						Html::warningBox( $this->msg( 'abusefilter-log-invalid-filter' )->escaped() )
+					)
+				);
+			}
+
 			// if a filter is hidden, users who can't view private filters should
 			// not be able to find log entries generated by it.
 			if ( !AbuseFilterView::canViewPrivate()
 				&& !$this->getUser()->isAllowed( 'abusefilter-log-private' )
 			) {
 				$searchedForPrivate = false;
-				foreach ( $searchFilters as $index => $filter ) {
-					if ( AbuseFilter::filterHidden( $filter ) ) {
-						unset( $searchFilters[$index] );
+				foreach ( $filtersList as $index => $filterData ) {
+					if ( AbuseFilter::filterHidden( ...$filterData ) ) {
+						unset( $filtersList[$index] );
 						$searchedForPrivate = true;
 					}
 				}
@@ -427,12 +494,28 @@ class SpecialAbuseLog extends SpecialPage {
 					$out->addWikiMsg( 'abusefilter-log-private-not-included' );
 				}
 			}
-			if ( empty( $searchFilters ) ) {
-				$out->addWikiMsg( 'abusefilter-log-noresults' );
 
+			foreach ( $filtersList as $filterData ) {
+				$searchFilters[] = AbuseFilter::buildGlobalName( ...$filterData );
+			}
+		}
+
+		$searchIDs = null;
+		if ( $this->mSearchGroup && !$this->mSearchFilter ) {
+			$searchIDs = $groupFilters;
+		} elseif ( !$this->mSearchGroup && $this->mSearchFilter ) {
+			$searchIDs = $searchFilters;
+		} elseif ( $this->mSearchGroup && $this->mSearchFilter ) {
+			$searchIDs = array_intersect( $groupFilters, $searchFilters );
+		}
+
+		if ( $searchIDs !== null ) {
+			if ( !count( $searchIDs ) ) {
+				$out->addWikiMsg( 'abusefilter-log-noresults' );
 				return;
 			}
-			$conds['afl_filter'] = $searchFilters;
+
+			$conds['afl_filter'] = $searchIDs;
 		}
 
 		$searchTitle = Title::newFromText( $this->mSearchTitle );
@@ -442,19 +525,16 @@ class SpecialAbuseLog extends SpecialPage {
 		}
 
 		if ( self::canSeeHidden() ) {
-			if ( $this->mSearchEntries == '1' ) {
+			if ( $this->mSearchEntries === '1' ) {
 				$conds['afl_deleted'] = 1;
-			} elseif ( $this->mSearchEntries == '2' ) {
-				$conds[] = self::getNotDeletedCond( $dbr );
+			} elseif ( $this->mSearchEntries === '2' ) {
+				$conds['afl_deleted'] = 0;
 			}
 		}
 
 		if ( in_array( $this->mSearchImpact, [ '1', '2' ] ) ) {
-			$unsuccessfulActionConds = $dbr->makeList( [
-				'afl_rev_id' => null,
-				'afl_log_id' => null,
-			], LIST_AND );
-			if ( $this->mSearchImpact == '1' ) {
+			$unsuccessfulActionConds = 'afl_rev_id IS NULL';
+			if ( $this->mSearchImpact === '1' ) {
 				$conds[] = "NOT ( $unsuccessfulActionConds )";
 			} else {
 				$conds[] = $unsuccessfulActionConds;
@@ -518,35 +598,33 @@ class SpecialAbuseLog extends SpecialPage {
 			[ 'abuse_filter' => [ 'LEFT JOIN', 'af_id=afl_filter' ] ]
 		);
 
+		$error = null;
 		if ( !$row ) {
-			$out->addWikiMsg( 'abusefilter-log-nonexistent' );
-
-			return;
-		}
-
-		if ( AbuseFilter::decodeGlobalName( $row->afl_filter ) ) {
-			$filter_hidden = null;
+			$error = 'abusefilter-log-nonexistent';
 		} else {
-			$filter_hidden = $row->af_hidden;
-		}
-
-		if ( !self::canSeeDetails( $row->afl_filter, $filter_hidden ) ) {
-			$out->addWikiMsg( 'abusefilter-log-cannot-see-details' );
-
-			return;
-		}
-
-		if ( self::isHidden( $row ) === true && !self::canSeeHidden() ) {
-			$out->addWikiMsg( 'abusefilter-log-details-hidden' );
-
-			return;
-		} elseif ( self::isHidden( $row ) === 'implicit' ) {
-			$rev = Revision::newFromId( $row->afl_rev_id );
-			// The log is visible, but refers to a deleted revision
-			if ( !$rev->userCan( Revision::SUPPRESSED_ALL, $this->getUser() ) ) {
-				$out->addWikiMsg( 'abusefilter-log-details-hidden-implicit' );
-				return;
+			list( $filterID, $global ) = AbuseFilter::splitGlobalName( $row->afl_filter );
+			if ( $global ) {
+				$filter_hidden = null;
+			} else {
+				$filter_hidden = $row->af_hidden;
 			}
+
+			if ( !self::canSeeDetails( $filterID, $global, $filter_hidden ) ) {
+				$error = 'abusefilter-log-cannot-see-details';
+			} elseif ( self::isHidden( $row ) === true && !self::canSeeHidden() ) {
+				$error = 'abusefilter-log-details-hidden';
+			} elseif ( self::isHidden( $row ) === 'implicit' ) {
+				$rev = Revision::newFromId( $row->afl_rev_id );
+				// The log is visible, but refers to a deleted revision
+				if ( !$rev->userCan( Revision::SUPPRESSED_ALL, $this->getUser() ) ) {
+					$error = 'abusefilter-log-details-hidden-implicit';
+				}
+			}
+		}
+
+		if ( $error ) {
+			$out->addWikiMsg( $error );
+			return;
 		}
 
 		$output = Xml::element(
@@ -563,7 +641,7 @@ class SpecialAbuseLog extends SpecialPage {
 		$out->addJsConfigVars( 'wgAbuseFilterVariables', $vars->dumpAllVars( true ) );
 
 		// Diff, if available
-		if ( $vars && $vars->getVar( 'action' )->toString() == 'edit' ) {
+		if ( $vars && $vars->getVar( 'action' )->toString() === 'edit' ) {
 			$old_wikitext = $vars->getVar( 'old_wikitext' )->toString();
 			$new_wikitext = $vars->getVar( 'new_wikitext' )->toString();
 
@@ -656,27 +734,26 @@ class SpecialAbuseLog extends SpecialPage {
 			[ 'abuse_filter' => [ 'LEFT JOIN', 'af_id=afl_filter' ] ]
 		);
 
+		$error = null;
 		if ( !$row ) {
-			$out->addWikiMsg( 'abusefilter-log-nonexistent' );
-
-			return;
-		}
-
-		if ( AbuseFilter::decodeGlobalName( $row->afl_filter ) ) {
-			$filter_hidden = null;
+			$error = 'abusefilter-log-nonexistent';
 		} else {
-			$filter_hidden = $row->af_hidden;
+			list( $filterID, $global ) = AbuseFilter::splitGlobalName( $row->afl_filter );
+			if ( $global ) {
+				$filter_hidden = null;
+			} else {
+				$filter_hidden = $row->af_hidden;
+			}
+
+			if ( !self::canSeeDetails( $filterID, $global, $filter_hidden ) ) {
+				$error = 'abusefilter-log-cannot-see-details';
+			} elseif ( !self::canSeePrivate() ) {
+				$error = 'abusefilter-log-cannot-see-private-details';
+			}
 		}
 
-		if ( !self::canSeeDetails( $row->afl_filter, $filter_hidden ) ) {
-			$out->addWikiMsg( 'abusefilter-log-cannot-see-details' );
-
-			return;
-		}
-
-		if ( !self::canSeePrivate() ) {
-			$out->addWikiMsg( 'abusefilter-log-cannot-see-private-details' );
-
+		if ( $error ) {
+			$out->addWikiMsg( $error );
 			return;
 		}
 
@@ -857,18 +934,19 @@ class SpecialAbuseLog extends SpecialPage {
 	}
 
 	/**
-	 * @param string|null $filter_id
-	 * @param bool|int|null $filter_hidden
+	 * @param int|null $id The ID of the filter
+	 * @param bool|int|null $global Whether the filter is global
+	 * @param bool|int|null $hidden Whether the filter is hidden
 	 * @return bool
 	 */
-	public static function canSeeDetails( $filter_id = null, $filter_hidden = null ) {
+	public static function canSeeDetails( $id = null, $global = false, $hidden = null ) {
 		global $wgUser;
 
-		if ( $filter_id !== null ) {
-			if ( $filter_hidden === null ) {
-				$filter_hidden = AbuseFilter::filterHidden( $filter_id );
+		if ( $id !== null ) {
+			if ( $hidden === null ) {
+				$hidden = AbuseFilter::filterHidden( $id, $global );
 			}
-			if ( $filter_hidden ) {
+			if ( $hidden ) {
 				return $wgUser->isAllowed( 'abusefilter-log-detail' ) && (
 					AbuseFilterView::canViewPrivate() || $wgUser->isAllowed( 'abusefilter-log-private' )
 				);
@@ -936,7 +1014,7 @@ class SpecialAbuseLog extends SpecialPage {
 					[ 'diff' => 'prev', 'oldid' => $row->afl_rev_id ] );
 
 				$diffLink = Linker::makeExternalLink( $diffUrl,
-					$this->msg( 'abusefilter-log-diff' )->parse() );
+					$this->msg( 'abusefilter-log-diff' )->text() );
 			}
 		}
 
@@ -963,12 +1041,12 @@ class SpecialAbuseLog extends SpecialPage {
 			$actions_taken = $lang->commaList( $displayActions );
 		}
 
-		$globalIndex = AbuseFilter::decodeGlobalName( $row->afl_filter );
+		list( $filterID, $global ) = AbuseFilter::splitGlobalName( $row->afl_filter );
 
-		if ( $globalIndex ) {
+		if ( $global ) {
 			// Pull global filter description
 			$escaped_comments = Sanitizer::escapeHtmlAllowEntities(
-				AbuseFilter::getGlobalFilterDescription( $globalIndex ) );
+				AbuseFilter::getGlobalFilterDescription( $filterID ) );
 			$filter_hidden = null;
 		} else {
 			$escaped_comments = Sanitizer::escapeHtmlAllowEntities(
@@ -976,7 +1054,7 @@ class SpecialAbuseLog extends SpecialPage {
 			$filter_hidden = $row->af_hidden;
 		}
 
-		if ( self::canSeeDetails( $row->afl_filter, $filter_hidden ) ) {
+		if ( self::canSeeDetails( $filterID, $global, $filter_hidden ) ) {
 			if ( $isListItem ) {
 				$detailsLink = $linkRenderer->makeKnownLink(
 					$this->getPageTitle( $row->afl_id ),
@@ -1007,18 +1085,18 @@ class SpecialAbuseLog extends SpecialPage {
 				$actionLinks[] = $hideLink;
 			}
 
-			if ( $globalIndex ) {
+			if ( $global ) {
 				$globalURL = WikiMap::getForeignURL(
 					$this->getConfig()->get( 'AbuseFilterCentralDB' ),
-					'Special:AbuseFilter/' . $globalIndex
+					'Special:AbuseFilter/' . $filterID
 				);
 				$linkText = $this->msg( 'abusefilter-log-detailedentry-global' )
-					->numParams( $globalIndex )->escaped();
+					->numParams( $filterID )->text();
 				$filterLink = Linker::makeExternalLink( $globalURL, $linkText );
 			} else {
-				$title = SpecialPage::getTitleFor( 'AbuseFilter', $row->afl_filter );
+				$title = SpecialPage::getTitleFor( 'AbuseFilter', $filterID );
 				$linkText = $this->msg( 'abusefilter-log-detailedentry-local' )
-					->numParams( $row->afl_filter )->text();
+					->numParams( $filterID )->text();
 				$filterLink = $linkRenderer->makeKnownLink( $title, $linkText );
 			}
 			$description = $this->msg( 'abusefilter-log-detailedentry-meta' )->rawParams(
@@ -1049,19 +1127,18 @@ class SpecialAbuseLog extends SpecialPage {
 			)->params( $row->afl_user_text )->parse();
 		}
 
+		$attribs = null;
 		if ( $isHidden === true ) {
-			$description .= ' ' .
-				$this->msg( 'abusefilter-log-hidden' )->parse();
-			$class = 'afl-hidden';
+			$attribs = [ 'class' => 'mw-abusefilter-log-hidden-entry' ];
 		} elseif ( $isHidden === 'implicit' ) {
 			$description .= ' ' .
 				$this->msg( 'abusefilter-log-hidden-implicit' )->parse();
 		}
 
 		if ( $isListItem ) {
-			return Xml::tags( 'li', isset( $class ) ? [ 'class' => $class ] : null, $description );
+			return Xml::tags( 'li', $attribs, $description );
 		} else {
-			return Xml::tags( 'span', isset( $class ) ? [ 'class' => $class ] : null, $description );
+			return Xml::tags( 'span', $attribs, $description );
 		}
 	}
 
@@ -1082,21 +1159,6 @@ class SpecialAbuseLog extends SpecialPage {
 	}
 
 	/**
-	 * @param \Wikimedia\Rdbms\IDatabase $db
-	 * @return string
-	 */
-	public static function getNotDeletedCond( $db ) {
-		$deletedZeroCond = $db->makeList(
-			[ 'afl_deleted' => 0 ], LIST_AND );
-		$deletedNullCond = $db->makeList(
-			[ 'afl_deleted' => null ], LIST_AND );
-		$notDeletedCond = $db->makeList(
-			[ $deletedZeroCond, $deletedNullCond ], LIST_OR );
-
-		return $notDeletedCond;
-	}
-
-	/**
 	 * Given a log entry row, decides whether or not it can be viewed by the public.
 	 *
 	 * @param stdClass $row The abuse_filter_log row object.
@@ -1112,7 +1174,7 @@ class SpecialAbuseLog extends SpecialPage {
 		}
 		if ( $row->afl_rev_id ) {
 			$revision = Revision::newFromId( $row->afl_rev_id );
-			if ( $revision && $revision->getVisibility() != 0 ) {
+			if ( $revision && $revision->getVisibility() !== 0 ) {
 				return 'implicit';
 			}
 		}

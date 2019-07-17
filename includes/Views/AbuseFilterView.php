@@ -3,7 +3,26 @@
 use Wikimedia\Rdbms\IDatabase;
 
 abstract class AbuseFilterView extends ContextSource {
-	public $mFilter, $mHistoryID, $mSubmit, $mPage, $mParams;
+	/**
+	 * @var string The ID of the current filter
+	 */
+	public $mFilter;
+	/**
+	 * @var string The history ID of the current filter
+	 */
+	public $mHistoryID;
+	/**
+	 * @var bool Whether the form was submitted
+	 */
+	public $mSubmit;
+	/**
+	 * @var SpecialAbuseFilter The related special page object
+	 */
+	public $mPage;
+	/**
+	 * @var array The parameters of the current request
+	 */
+	public $mParams;
 
 	/**
 	 * @var \MediaWiki\Linker\LinkRenderer
@@ -208,7 +227,7 @@ abstract class AbuseFilterView extends ContextSource {
 
 		// Add script
 		$this->getOutput()->addModules( 'ext.abuseFilter.edit' );
-		AbuseFilter::$editboxName = $textName;
+		$this->getOutput()->addJsConfigVars( 'abuseFilterBoxName', $textName );
 
 		return $rulesContainer;
 	}
@@ -286,7 +305,15 @@ abstract class AbuseFilterView extends ContextSource {
 					'rc_log_type' => 'delete',
 					'rc_log_action' => 'delete'
 				], LIST_AND );
-			// @ToDo: case 'upload'
+			case 'upload':
+				return $db->makeList( [
+					'rc_source' => RecentChange::SRC_LOG,
+					'rc_log_type' => 'upload',
+					'rc_log_action' => [ 'upload', 'overwrite', 'revert' ]
+				], LIST_AND );
+			case false:
+				// Done later
+				break;
 			default:
 				throw new MWException( __METHOD__ . ' called with invalid action: ' . $action );
 		}
@@ -311,7 +338,10 @@ abstract class AbuseFilterView extends ContextSource {
 						'rc_log_type' => 'delete',
 						'rc_log_action' => 'delete'
 					], LIST_AND ),
-					// @todo: add upload
+					$db->makeList( [
+						'rc_log_type' => 'upload',
+						'rc_log_action' => [ 'upload', 'overwrite', 'revert' ]
+					], LIST_AND ),
 				], LIST_OR ),
 			], LIST_AND ),
 		], LIST_OR );

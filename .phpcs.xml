@@ -3,8 +3,6 @@
 	<rule ref="./vendor/mediawiki/mediawiki-codesniffer/MediaWiki" />
 	<rule ref="Generic.Files.LineLength">
 		<exclude-pattern>AbuseFilter\.alias\.php</exclude-pattern>
-		<exclude-pattern>AbuseFilterParserTest\.php</exclude-pattern>
-		<exclude-pattern>AbuseFilterConsequencesTest\.php</exclude-pattern>
 	</rule>
 	<file>.</file>
 	<arg name="extensions" value="php,php5,inc"/>

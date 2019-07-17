@@ -39,17 +39,13 @@ class ApiQueryAbuseLog extends ApiQueryBase {
 	}
 
 	/**
-	 * @see ApiQueryBase::execute()
+	 * @inheritDoc
 	 */
 	public function execute() {
-		$user = $this->getUser();
-		$errors = $this->getTitle()->getUserPermissionsErrors(
-			'abusefilter-log', $user, true, [ 'ns-specialprotected' ] );
-		if ( count( $errors ) ) {
-			$this->dieStatus( $this->errorArrayToStatus( $errors ) );
-			return;
-		}
+		// Same check as in SpecialAbuseLog
+		$this->checkUserRightsAny( 'abusefilter-log' );
 
+		$user = $this->getUser();
 		$params = $this->extractRequestParams();
 
 		$prop = array_flip( $params['prop'] );
@@ -78,7 +74,8 @@ class ApiQueryAbuseLog extends ApiQueryBase {
 				$params['filter'] = [ $params['filter'] ];
 			}
 			foreach ( $params['filter'] as $filter ) {
-				if ( AbuseFilter::filterHidden( $filter ) ) {
+				list( $filterID, $global ) = AbuseFilter::splitGlobalName( $filter );
+				if ( AbuseFilter::filterHidden( $filterID, $global ) ) {
 					$this->dieWithError(
 						[ 'apierror-permissiondenied', $this->msg( 'action-abusefilter-log-private' ) ]
 					);
@@ -114,9 +111,6 @@ class ApiQueryAbuseLog extends ApiQueryBase {
 
 		$this->addWhereRange( 'afl_timestamp', $params['dir'], $params['start'], $params['end'] );
 
-		$db = $this->getDB();
-		$notDeletedCond = SpecialAbuseLog::getNotDeletedCond( $db );
-
 		if ( isset( $params['user'] ) ) {
 			$u = User::newFromName( $params['user'] );
 			if ( $u ) {
@@ -141,8 +135,11 @@ class ApiQueryAbuseLog extends ApiQueryBase {
 			}
 		}
 
-		$this->addWhereIf( [ 'afl_filter' => $params['filter'] ], isset( $params['filter'] ) );
-		$this->addWhereIf( $notDeletedCond, !SpecialAbuseLog::canSeeHidden() );
+		$this->addWhereIf(
+			[ 'afl_filter' => $params['filter'] ],
+			isset( $params['filter'] ) && $params['filter'] !== []
+		);
+		$this->addWhereIf( [ 'afl_deleted' => 0 ], !SpecialAbuseLog::canSeeHidden() );
 		if ( isset( $params['wiki'] ) ) {
 			// 'wiki' won't be set if $wgAbuseFilterIsCentral = false
 			$this->addWhereIf( [ 'afl_wiki' => $params['wiki'] ], $isCentral );
@@ -176,7 +173,8 @@ class ApiQueryAbuseLog extends ApiQueryBase {
 					continue;
 				}
 			}
-			$canSeeDetails = SpecialAbuseLog::canSeeDetails( $row->afl_filter );
+			list( $filterID, $global ) = AbuseFilter::splitGlobalName( $row->afl_filter );
+			$canSeeDetails = SpecialAbuseLog::canSeeDetails( $filterID, $global );
 
 			$entry = [];
 			if ( $fld_ids ) {
@@ -184,9 +182,8 @@ class ApiQueryAbuseLog extends ApiQueryBase {
 				$entry['filter_id'] = $canSeeDetails ? $row->afl_filter : '';
 			}
 			if ( $fld_filter ) {
-				$globalIndex = AbuseFilter::decodeGlobalName( $row->afl_filter );
-				if ( $globalIndex ) {
-					$entry['filter'] = AbuseFilter::getGlobalFilterDescription( $globalIndex );
+				if ( $global ) {
+					$entry['filter'] = AbuseFilter::getGlobalFilterDescription( $filterID );
 				} else {
 					$entry['filter'] = $row->af_public_comments;
 				}

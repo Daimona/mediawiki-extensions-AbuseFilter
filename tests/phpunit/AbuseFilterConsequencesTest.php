@@ -1,4 +1,11 @@
 <?php
+
+use MediaWiki\Block\DatabaseBlock;
+use MediaWiki\Session\SessionManager;
+use MediaWiki\MediaWikiServices;
+use MediaWiki\Storage\NameTableAccessException;
+use MediaWiki\Storage\PageEditStash;
+
 /**
  * Complete tests where filters are saved, actions are executed and the right
  *   consequences are expected to be taken
@@ -23,26 +30,39 @@
  * @license GPL-2.0-or-later
  */
 
-use MediaWiki\MediaWikiServices;
-use MediaWiki\Storage\NameTableAccessException;
-
 /**
  * @group Test
  * @group AbuseFilter
  * @group AbuseFilterConsequences
  * @group Database
+ * @group Large
  *
  * @covers AbuseFilter
  * @covers AbuseFilterHooks
- * @covers AbuseFilterParser
- * @covers AFPData
- * @covers AbuseFilterTokenizer
- * @covers AFPToken
- * @covers AbuseFilterVariableHolder
- * @covers AFComputedVariable
+ * @covers AbuseFilterPreAuthenticationProvider
+ * @covers AbuseFilterParser::__construct
+ * @todo Add upload actions everywhere
  */
 class AbuseFilterConsequencesTest extends MediaWikiTestCase {
-	protected static $mUser;
+	/**
+	 * @var User The user performing actions
+	 */
+	private static $mUser;
+	/**
+	 * @var \MediaWiki\Session\Session The session object to use for edits
+	 */
+	private static $mEditSession;
+	/** To be used as fake timestamp in several tests */
+	const MAGIC_TIMESTAMP = 2051222400;
+	/** Prefix for tables to emulate an external DB */
+	const DB_EXTERNAL_PREFIX = 'external_';
+	/** Tables to create in the external DB */
+	public static $externalTables = [
+		'abuse_filter',
+		'abuse_filter_action',
+		'abuse_filter_log',
+		'text',
+	];
 
 	/**
 	 * @var array This tables will be deleted in parent::tearDown
@@ -54,31 +74,18 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 		'abuse_filter_log',
 		'page',
 		'ipblocks',
+		'logging',
+		'change_tag',
+		'user',
+		'text'
 	];
 
-	// Properties of the filter rows that we're not interested in changing.
-	// Write them once to save space
-	protected static $defaultRowSection = [
-		'af_user_text' => 'FilterTester',
-		'af_user' => 0,
-		'af_timestamp' => '20180707105743',
-		'af_group' => 'default',
-		'af_hit_count' => 0,
-	];
-
+	// phpcs:disable Generic.Files.LineLength
 	// Filters that may be created, their key is the ID.
 	protected static $filters = [
 		1 => [
-			'af_id' => 1,
 			'af_pattern' => 'added_lines irlike "foo"',
-			'af_enabled' => 1,
-			'af_comments' => 'Comments',
 			'af_public_comments' => 'Mock filter for edit',
-			'af_hidden' => 0,
-			'af_throttled' => 0,
-			'af_deleted' => 0,
-			'af_actions' => 'warn,tag',
-			'af_global' => 0,
 			'actions' => [
 				'warn' => [
 					'abusefilter-my-warning'
@@ -89,16 +96,9 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 			]
 		],
 		2 => [
-			'af_id' => 2,
 			'af_pattern' => 'action = "move" & moved_to_title contains "test" & moved_to_title === moved_to_text',
-			'af_enabled' => 1,
-			'af_comments' => 'No comment',
 			'af_public_comments' => 'Mock filter for move',
 			'af_hidden' => 1,
-			'af_throttled' => 0,
-			'af_deleted' => 0,
-			'af_actions' => 'disallow,block',
-			'af_global' => 0,
 			'actions' => [
 				'disallow' => [],
 				'block' => [
@@ -109,44 +109,22 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 			]
 		],
 		3 => [
-			'af_id' => 3,
 			'af_pattern' => 'action = "delete" & "test" in lcase(page_prefixedtitle) & page_prefixedtitle === article_prefixedtext',
-			'af_enabled' => 1,
-			'af_comments' => '',
 			'af_public_comments' => 'Mock filter for delete',
-			'af_hidden' => 0,
-			'af_throttled' => 0,
-			'af_deleted' => 0,
-			'af_actions' => 'degroup',
-			'af_global' => 0,
+			'af_global' => 1,
 			'actions' => [
 				'degroup' => []
 			]
 		],
 		4 => [
-			'af_id' => 4,
 			'af_pattern' => 'action contains "createaccount" & accountname rlike "user" & page_title === article_text',
-			'af_enabled' => 1,
-			'af_comments' => '1',
 			'af_public_comments' => 'Mock filter for createaccount',
 			'af_hidden' => 1,
-			'af_throttled' => 0,
-			'af_deleted' => 0,
-			'af_actions' => '',
-			'af_global' => 0,
 			'actions' => []
 		],
 		5 => [
-			'af_id' => 5,
 			'af_pattern' => 'user_name == "FilteredUser"',
-			'af_enabled' => 1,
-			'af_comments' => '',
 			'af_public_comments' => 'Mock filter',
-			'af_hidden' => 0,
-			'af_throttled' => 0,
-			'af_deleted' => 0,
-			'af_actions' => 'tag',
-			'af_global' => 0,
 			'actions' => [
 				'tag' => [
 					'firstTag',
@@ -155,16 +133,10 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 			]
 		],
 		6 => [
-			'af_id' => 6,
 			'af_pattern' => 'edit_delta === 7',
-			'af_enabled' => 1,
-			'af_comments' => '',
 			'af_public_comments' => 'Mock filter with edit_delta',
 			'af_hidden' => 1,
-			'af_throttled' => 0,
-			'af_deleted' => 0,
-			'af_actions' => 'disallow',
-			'af_global' => 0,
+			'af_global' => 1,
 			'actions' => [
 				'disallow' => [
 					'abusefilter-disallowed-really'
@@ -172,31 +144,15 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 			]
 		],
 		7 => [
-			'af_id' => 7,
 			'af_pattern' => 'timestamp === int(timestamp)',
-			'af_enabled' => 1,
-			'af_comments' => '',
 			'af_public_comments' => 'Mock filter with timestamp',
-			'af_hidden' => 0,
-			'af_throttled' => 0,
-			'af_deleted' => 0,
-			'af_actions' => 'degroup',
-			'af_global' => 0,
 			'actions' => [
 				'degroup' => []
 			]
 		],
 		8 => [
-			'af_id' => 8,
 			'af_pattern' => 'added_lines_pst irlike "\\[\\[Link\\|Link\\]\\]"',
-			'af_enabled' => 1,
-			'af_comments' => '',
 			'af_public_comments' => 'Mock filter with pst',
-			'af_hidden' => 0,
-			'af_hit_count' => 0,
-			'af_deleted' => 0,
-			'af_actions' => 'disallow,block',
-			'af_global' => 0,
 			'actions' => [
 				'disallow' => [],
 				'block' => [
@@ -207,16 +163,9 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 			]
 		],
 		9 => [
-			'af_id' => 9,
 			'af_pattern' => 'new_size > old_size',
-			'af_enabled' => 1,
-			'af_comments' => '',
 			'af_public_comments' => 'Mock filter with size',
 			'af_hidden' => 1,
-			'af_throttled' => 0,
-			'af_deleted' => 0,
-			'af_actions' => 'disallow,block',
-			'af_global' => 0,
 			'actions' => [
 				'disallow' => [],
 				'block' => [
@@ -227,16 +176,10 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 			]
 		],
 		10 => [
-			'af_id' => 10,
 			'af_pattern' => '1 == 1',
-			'af_enabled' => 1,
-			'af_comments' => '',
 			'af_public_comments' => 'Mock throttled filter',
 			'af_hidden' => 1,
 			'af_throttled' => 1,
-			'af_deleted' => 0,
-			'af_actions' => 'tag,block',
-			'af_global' => 0,
 			'actions' => [
 				'tag' => [
 					'testTag'
@@ -249,36 +192,20 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 			]
 		],
 		11 => [
-			'af_id' => 11,
 			'af_pattern' => '1 == 1',
-			'af_enabled' => 1,
-			'af_comments' => '',
-			'af_public_comments' => 'Mock filter which throttles',
-			'af_hidden' => 0,
-			'af_throttled' => 0,
-			'af_deleted' => 0,
-			'af_actions' => 'throttle,disallow',
-			'af_global' => 0,
+			'af_public_comments' => 'Catch-all filter which throttles',
 			'actions' => [
 				'throttle' => [
 					11,
 					'1,3600',
-					'user'
+					'site'
 				],
 				'disallow' => []
 			]
 		],
 		12 => [
-			'af_id' => 12,
 			'af_pattern' => 'page_title == user_name & user_name === page_title',
-			'af_enabled' => 1,
-			'af_comments' => '',
 			'af_public_comments' => 'Mock filter for userpage',
-			'af_hidden' => 0,
-			'af_throttled' => 0,
-			'af_deleted' => 0,
-			'af_actions' => 'disallow,block,degroup',
-			'af_global' => 0,
 			'actions' => [
 				'disallow' => [],
 				'block' => [
@@ -290,16 +217,9 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 			]
 		],
 		13 => [
-			'af_id' => 13,
 			'af_pattern' => '2 == 2',
-			'af_enabled' => 1,
-			'af_comments' => '',
 			'af_public_comments' => 'Another throttled mock filter',
-			'af_hidden' => 0,
 			'af_throttled' => 1,
-			'af_deleted' => 0,
-			'af_actions' => 'block,degroup',
-			'af_global' => 0,
 			'actions' => [
 				'block' => [
 					'blocktalk',
@@ -310,38 +230,108 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 			]
 		],
 		14 => [
-			'af_id' => 14,
 			'af_pattern' => '5/int(article_text) == 3',
-			'af_enabled' => 1,
-			'af_comments' => '',
 			'af_public_comments' => 'Filter with a possible division by zero',
-			'af_hidden' => 0,
-			'af_throttled' => 0,
-			'af_deleted' => 0,
-			'af_actions' => 'disallow',
-			'af_global' => 0,
 			'actions' => [
 				'disallow' => []
 			]
+		],
+		15 => [
+			'af_pattern' => 'action contains "createaccount"',
+			'af_public_comments' => 'Catch-all for account creations',
+			'af_hidden' => 1,
+			'actions' => [
+				'disallow' => []
+			]
+		],
+		16 => [
+			'af_pattern' => 'random := "adruhaoerihouhae"; added_lines contains random | ' .
+				'edit_diff_pst contains random | new_pst contains random | new_html contains random |' .
+				'1=1 | /*Superfluous condition to set a lazyLoader but not compute*/all_links contains random',
+			'af_public_comments' => 'Filter computing several non-lazy variables',
+			'actions' => [
+				'disallow' => []
+			]
+		],
+		17 => [
+			'af_pattern' => 'timestamp = "' . self::MAGIC_TIMESTAMP . '" | 3 = 2 | 1 = 4 | 5 = 7 | 6 = 3',
+			'af_comments' => 'This will normally consume 5 conditions, unless the timestamp is set to' .
+				'the magic value of self::MAGIC_TIMESTAMP.',
+			'af_public_comments' => 'Test with variable conditions',
+			'actions' => [
+				'tag' => [
+					'testTagProfiling'
+				]
+			]
+		],
+		18 => [
+			'af_pattern' => '1 == 1',
+			'af_public_comments' => 'Global filter',
+			'af_global' => 1,
+			'actions' => [
+				'warn' => [
+					'abusefilter-warning'
+				],
+				'disallow' => []
+			]
+		],
+		19 => [
+			'af_pattern' => 'user_name === "FilteredUser"',
+			'af_public_comments' => 'Another global filter',
+			'af_global' => 1,
+			'actions' => [
+				'tag' => [
+					'globalTag'
+				]
+			]
+		],
+		20 => [
+			'af_pattern' => 'page_title === "Cellar door"',
+			'af_public_comments' => 'Yet another global filter',
+			'af_global' => 1,
+			'actions' => [
+				'disallow' => [],
+			]
 		]
 	];
+	// phpcs:enable Generic.Files.LineLength
+
+	/**
+	 * Add tables for global filters to the list of used tables
+	 *
+	 * @inheritDoc
+	 */
+	public function __construct( $name = null, array $data = [], $dataName = '' ) {
+		$prefixedTables = array_map(
+			function ( $table ) {
+				return self::DB_EXTERNAL_PREFIX . $table;
+			},
+			self::$externalTables
+		);
+		$this->tablesUsed = array_merge( $this->tablesUsed, $prefixedTables );
+		parent::__construct( $name, $data, $dataName );
+	}
 
 	/**
 	 * @see MediaWikiTestCase::setUp
 	 */
 	protected function setUp() {
 		parent::setUp();
+		self::$mEditSession = SessionManager::singleton()->getEmptySession();
 		$user = User::newFromName( 'FilteredUser' );
 		$user->addToDatabase();
 		$user->addGroup( 'sysop' );
-		if ( $user->isBlocked() ) {
-			$block = Block::newFromTarget( $user );
+		$block = DatabaseBlock::newFromTarget( $user );
+		if ( $block ) {
 			$block->delete();
 		}
 		self::$mUser = $user;
+
 		// Make sure that the config we're using is the one we're expecting
 		$this->setMwGlobals( [
 			'wgUser' => $user,
+			// Exclude noisy creation log
+			'wgPageCreationLog' => false,
 			'wgAbuseFilterActions' => [
 				'throttle' => true,
 				'warn' => true,
@@ -352,9 +342,104 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 				'degroup' => true,
 				'tag' => true
 			],
-			'wgAbuseFilterRuntimeProfile' => true,
-			'wgAbuseFilterProfile' => true
+			'wgAbuseFilterCentralDB' => $this->db->getDBname() . '-' . $this->dbPrefix() .
+				self::DB_EXTERNAL_PREFIX,
+			'wgAbuseFilterIsCentral' => false
 		] );
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	protected function tearDown() {
+		// Paranoia: ensure no fake timestamp leftover
+		MWTimestamp::setFakeTime( false );
+		parent::tearDown();
+	}
+
+	/**
+	 * Creates new filters with the given ids, referred to self::$filters
+	 *
+	 * @param int[] $ids IDs of the filters to create
+	 * @param bool $external Whether to create filters in the external table
+	 */
+	private static function createFilters( $ids, $external = false ) {
+		global $wgAbuseFilterActions;
+		$dbw = wfGetDB( DB_MASTER );
+		$tablePrefix = $external ? self::DB_EXTERNAL_PREFIX : '';
+		$defaultRowSection = [
+			'af_user_text' => 'FilterTester',
+			'af_user' => 0,
+			'af_timestamp' => $dbw->timestamp(),
+			'af_group' => 'default',
+			'af_comments' => '',
+			'af_hit_count' => 0,
+			'af_enabled' => 1,
+			'af_hidden' => 0,
+			'af_throttled' => 0,
+			'af_deleted' => 0,
+			'af_global' => 0
+		];
+
+		foreach ( $ids as $id ) {
+			$filter = self::$filters[$id] + $defaultRowSection;
+			$actions = $filter['actions'];
+			unset( $filter['actions'] );
+			$filter[ 'af_actions' ] = implode( ',', array_keys( $actions ) );
+			$filter[ 'af_id' ] = $id;
+
+			$dbw->insert(
+				"{$tablePrefix}abuse_filter",
+				$filter,
+				__METHOD__
+			);
+
+			$actionsRows = [];
+			foreach ( array_filter( $wgAbuseFilterActions ) as $action => $_ ) {
+				if ( isset( $actions[$action] ) ) {
+					$parameters = $actions[$action];
+
+					$thisRow = [
+						'afa_filter' => $id,
+						'afa_consequence' => $action,
+						'afa_parameters' => implode( "\n", $parameters )
+					];
+					$actionsRows[] = $thisRow;
+				}
+			}
+
+			$dbw->insert(
+				"{$tablePrefix}abuse_filter_action",
+				$actionsRows,
+				__METHOD__
+			);
+		}
+	}
+
+	/**
+	 * Stash the edit.
+	 * @todo Maybe we can just call the ParserOutputStashForEdit hook
+	 *
+	 * @param Title $title Title of the page to edit
+	 * @param string $text The new content of the page
+	 * @param string $summary The summary of the edit
+	 * @return string The status of the operation, as returned by the API.
+	 */
+	private function stashEdit( $title, $text, $summary ) {
+		$this->setMwGlobals( [ 'wgMainCacheType' => 'hash' ] );
+		$editStash = new PageEditStash(
+			new HashBagOStuff( [] ),
+			MediaWikiServices::getInstance()->getDBLoadBalancer(),
+			new Psr\Log\NullLogger(),
+			new NullStatsdDataFactory(),
+			PageEditStash::INITIATOR_USER
+		);
+		return $editStash->parseAndCache(
+			WikiPage::factory( $title ),
+			new WikitextContent( $text ),
+			self::$mUser,
+			$summary
+		);
 	}
 
 	/**
@@ -364,12 +449,16 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 	 * @param string $oldText Old content of the page
 	 * @param string $newText The new content of the page
 	 * @param string $summary The summary of the edit
+	 * @param bool|null $fromStash Whether to stash the edit. Null means no stashing, false means
+	 *   stash the edit but don't reuse it for saving, true means stash and reuse.
 	 * @return Status
 	 */
-	private static function doEdit( $title, $oldText, $newText, $summary ) {
+	private function doEdit( $title, $oldText, $newText, $summary, $fromStash = null ) {
 		$page = WikiPage::factory( $title );
-		$content = ContentHandler::makeContent( $oldText, $title );
-		$page->doEditContent( $content, 'Creating the page for testing AbuseFilter.' );
+		if ( !$page->exists() ) {
+			$content = ContentHandler::makeContent( $oldText, $title );
+			$page->doEditContent( $content, 'Creating the page for testing AbuseFilter.' );
+		}
 
 		$params = [
 			'wpTextbox1' => $newText,
@@ -382,7 +471,20 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 			'wpMinorEdit' => false,
 			'wpWatchthis' => false
 		];
-		$req = new FauxRequest( $params, true );
+		$req = new FauxRequest( $params, true, self::$mEditSession );
+
+		if ( $fromStash !== null ) {
+			// If we want to save from stash, submit the same text
+			$stashText = $newText;
+			if ( $fromStash === false ) {
+				// Otherwise, stash some random text which won't match the actual edit
+				$stashText = md5( uniqid( rand(), true ) );
+			}
+			$stashResult = $this->stashEdit( $title, $stashText, $summary );
+			if ( $stashResult !== PageEditStash::ERROR_NONE ) {
+				throw new MWException( "The edit cannot be stashed, got the following error: $stashResult" );
+			}
+		}
 
 		$article = new Article( $title );
 		$article->getContext()->setTitle( $title );
@@ -398,45 +500,58 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 	 * Executes an action to filter
 	 *
 	 * @param array $params Parameters of the action
-	 * @param array $options Further options
-	 * @return Status|Status[]
+	 * @return Status
 	 */
-	private static function doAction( $params, $options ) {
-		$type = array_shift( $params );
-		$target = array_shift( $params );
-		$target = Title::newFromText( $target );
+	private function doAction( $params ) {
+		$target = Title::newFromText( $params['target'] );
 		// Make sure that previous blocks don't affect the test
 		self::$mUser->clearInstanceCache();
+		if ( $params['action'] === 'move' || $params['action'] === 'delete' ) {
+			// For these actions, the page has to exist.
+			$page = $this->getExistingTestPage( $target );
+		}
 
-		switch ( $type ) {
+		switch ( $params['action'] ) {
 			case 'edit':
-				if ( in_array( 'makeGoodEditFirst', $options ) ) {
-					$firstStatus = self::doEdit(
-						$target, $params['oldText'], $params['firstNewText'], $params['summary']
-					);
-					$secondStatus = self::doEdit(
-						$target, $params['firstNewText'], $params['secondNewText'], $params['summary']
-					);
-					$status = [ $firstStatus, $secondStatus ];
-				} else {
-					$status = self::doEdit( $target, $params['oldText'], $params['newText'], $params['summary'] );
-				}
+				$status = $this->doEdit( $target, $params['oldText'], $params['newText'], $params['summary'] );
+				break;
+			case 'stashedit':
+				$stashStatus = $params['stashType'] === 'hit';
+				$status = $this->doEdit(
+					$target,
+					$params['oldText'],
+					$params['newText'],
+					$params['summary'],
+					$stashStatus
+				);
 				break;
 			case 'move':
-				$mp = new MovePage( $target, Title::newFromText( $params['newTitle'] ) );
-				$status = $mp->move( self::$mUser, 'AbuseFilter move test', false, [] );
+				$newTitle = isset( $params['newTitle'] )
+					? Title::newFromText( $params['newTitle'] )
+					: $this->getNonExistingTestPage()->getTitle();
+				$mp = new MovePage( $target, $newTitle );
+				$status = $mp->move( self::$mUser, 'AbuseFilter move test', false );
 				break;
 			case 'delete':
-				$page = WikiPage::factory( $target );
-				$content = ContentHandler::makeContent( 'Page to be deleted in AbuseFilter test', $target );
-				$page->doEditContent( $content, 'Creating the page for testing deletion AbuseFilter.' );
 				$status = $page->doDeleteArticleReal( 'Testing deletion in AbuseFilter' );
 				break;
 			case 'createaccount':
 				$user = User::newFromName( $params['username'] );
 				$provider = new AbuseFilterPreAuthenticationProvider();
 				$status = $provider->testForAccountCreation( $user, $user, [] );
+
+				// A creatable username must exist to be passed to $logEntry->setPerformer(),
+				// so create the account.
+				$user->addToDatabase();
+
+				$logEntry = new \ManualLogEntry( 'newusers', 'create' );
+				$logEntry->setPerformer( $user );
+				$logEntry->setTarget( $user->getUserPage() );
+				$logid = $logEntry->insert();
+				$logEntry->publish( $logid );
 				break;
+			default:
+				throw new UnexpectedValueException( 'Unrecognized action ' . $params['action'] );
 		}
 
 		// Clear cache since we'll need to retrieve some fresh data about the user
@@ -447,96 +562,79 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 	}
 
 	/**
-	 * Creates new filters with the given ids, referred to self::$filters
-	 *
-	 * @param int[] $ids IDs of the filters to create
+	 * @param array[] $actionsParams Arrays of parameters for every action
+	 * @return Status[]
 	 */
-	private static function createFilters( $ids ) {
-		global $wgAbuseFilterActions;
-		$dbw = wfGetDB( DB_MASTER );
-
-		foreach ( $ids as $id ) {
-			$filter = array_merge( self::$filters[$id], self::$defaultRowSection );
-			$actions = $filter['actions'];
-			unset( $filter['actions'] );
-
-			$dbw->replace(
-				'abuse_filter',
-				[ 'af_id' ],
-				$filter,
-				__METHOD__
-			);
-
-			$actionRows = [];
-			foreach ( array_filter( $wgAbuseFilterActions ) as $action => $_ ) {
-				if ( isset( $actions[$action] ) ) {
-					$parameters = $actions[$action];
-
-					$thisRow = [
-						'afa_filter' => $id,
-						'afa_consequence' => $action,
-						'afa_parameters' => implode( "\n", $parameters )
-					];
-					$actionsRows[] = $thisRow;
-				}
-			}
-
-			$dbw->replace(
-				'abuse_filter_action',
-				[ 'afa_filter' ],
-				$actionsRows,
-				__METHOD__
-			);
+	private function doActions( $actionsParams ) {
+		$ret = [];
+		foreach ( $actionsParams as $params ) {
+			$ret[] = $this->doAction( $params );
 		}
+		return $ret;
 	}
 
 	/**
-	 * Creates new filters, execute an action and check the consequences
+	 * Helper function to retrieve change tags applied to an edit or log entry
 	 *
-	 * @param string $testDescription A short description of the test, used for error reporting
-	 * @param int[] $createIds IDs of the filters to create
-	 * @param array $actionParams Details of the action we need to execute to trigger filters
-	 * @param array $consequences The consequences we're expecting
-	 * @param array $options Further options for the test
-	 * @covers AbuseFilter
-	 * @dataProvider provideFilters
+	 * @param array $actionParams As given by the data provider
+	 * @return string[] The applied tags
+	 * @fixme This method is pretty hacky. A clean alternative from core would be nice.
 	 */
-	public function testFilterConsequences(
-		$testDescription,
-		$createIds,
-		$actionParams,
-		$consequences,
-		$options
-	) {
-		global $wgLang;
-		self::createFilters( $createIds );
-
-		if ( in_array( 'makeGoodEditFirst', $options ) ) {
-			$this->setMwGlobals( [
-				// Necessary to test throttle
-				'wgMainCacheType' => CACHE_ANYTHING
-			] );
-		}
-		if ( in_array( 'hitCondsLimit', $options ) ) {
-			$this->setMwGlobals( [
-				'wgAbuseFilterConditionLimit' => 0
-			] );
-		}
-		if ( in_array( 'hitTimeLimit', $options ) ) {
-			$this->setMwGlobals( [
-				'wgAbuseFilterSlowFilterRuntimeLimit' => 0
-			] );
-		}
-		if ( in_array( 'hitThrottleLimit', $options ) ) {
-			$this->setMwGlobals( [
-				'wgAbuseFilterEmergencyDisableCount' => [
-					'default' => 0
-				]
-			] );
+	private function getActionTags( $actionParams ) {
+		if ( $actionParams['action'] === 'edit' || $actionParams['action'] === 'stashedit' ) {
+			$page = WikiPage::factory( Title::newFromText( $actionParams['target'] ) );
+			$where = [ 'ct_rev_id' => $page->getLatest() ];
+		} else {
+			$logType = $actionParams['action'] === 'createaccount' ? 'newusers' : $actionParams['action'];
+			$logAction = $logType === 'newusers' ? 'create' : $logType;
+			$title = Title::newFromText( $actionParams['target'] );
+			$id = $this->db->selectField(
+				'logging',
+				'log_id',
+				[
+					'log_title' => $title->getDBkey(),
+					'log_type' => $logType,
+					'log_action' => $logAction
+				],
+				__METHOD__,
+				[],
+				[ 'ORDER BY' => 'log_id DESC' ]
+			);
+			if ( !$id ) {
+				$this->fail( 'Could not find the action in the logging table.' );
+			}
+			$where = [ 'ct_log_id' => $id ];
 		}
 
-		$result = self::doAction( $actionParams, $options );
+		$changeTagDefStore = MediaWikiServices::getInstance()->getChangeTagDefStore();
+		$tagIds = $this->db->selectFieldValues(
+			'change_tag',
+			'ct_tag_id',
+			$where,
+			__METHOD__
+		);
+		$appliedTags = [];
+		foreach ( $tagIds as $tagId ) {
+			try {
+				$appliedTags[] = $changeTagDefStore->getName( (int)$tagId );
+			} catch ( NameTableAccessException $exception ) {
+				continue;
+			}
+		}
 
+		return $appliedTags;
+	}
+
+	/**
+	 * Checks that consequences are effectively taken and builds an array of expected and actual
+	 * consequences which can be compared.
+	 *
+	 * @param Status $result As returned by self::doAction
+	 * @param array $actionParams As it's given by data providers
+	 * @param array $consequences As it's given by data providers
+	 * @return array [ expected consequences, actual consequences ]
+	 */
+	private function checkConsequences( $result, $actionParams, $consequences ) {
 		$expectedErrors = [];
 		$testErrorMessage = false;
 		foreach ( $consequences as $consequence => $ids ) {
@@ -561,15 +659,16 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 							break;
 						}
 
-							$shouldPreventTalkEdit = $params[0] === 'blocktalk';
-						$edittalkCheck = $userBlock->prevents( 'editownusertalk' ) === $shouldPreventTalkEdit;
+						$shouldPreventTalkEdit = $params[0] === 'blocktalk';
+						$edittalkCheck = $userBlock->appliesToUsertalk( self::$mUser->getTalkPage() ) ===
+							$shouldPreventTalkEdit;
 						if ( !$edittalkCheck ) {
 							$testErrorMessage = 'The expected block option "edittalk" options does not ' .
 								'match the actual one.';
 							break;
 						}
 
-							$expectedExpiry = SpecialBlock::parseExpiryInput( $params[2] );
+						$expectedExpiry = SpecialBlock::parseExpiryInput( $params[2] );
 						// Get rid of non-numeric 'infinity' by setting it to 0
 						$actualExpiry = wfIsInfinity( $userBlock->getExpiry() ) ? 0 : $userBlock->getExpiry();
 						$expectedExpiry = wfIsInfinity( $expectedExpiry ) ? 0 : $expectedExpiry;
@@ -581,7 +680,7 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 							break;
 						}
 
-							$expectedErrors['block'][] = 'abusefilter-blocked-display';
+						$expectedErrors['block'][] = 'abusefilter-blocked-display';
 						break;
 					case 'degroup':
 						// Aborts the hook with 'abusefilter-degrouped' error and degroups the user.
@@ -593,74 +692,25 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 						break;
 					case 'tag':
 						// Only add tags, to be retrieved in change_tag table.
-						if ( $actionParams[1] === null ) {
-							// It's an account creation, so no tags.
-							break;
-						}
-						$title = Title::newFromText( $actionParams[1] );
-						$page = WikiPage::factory( $title );
-						$revId = $page->getLatest();
-						$dbr = wfGetDB( DB_REPLICA );
-						$changeTagDefStore = MediaWikiServices::getInstance()->getChangeTagDefStore();
-						$tagIds = $dbr->selectFieldValues(
-							'change_tag',
-							'ct_tag_id',
-							[ 'ct_rev_id' => $revId ],
-							__METHOD__
-						);
-						$appliedTags = [];
-						foreach ( $tagIds as $tagId ) {
-							try {
-								$appliedTags[] = $changeTagDefStore->getName( (int)$tagId );
-							} catch ( NameTableAccessException $exception ) {
-								continue;
-							}
-						}
-
+						$appliedTags = $this->getActionTags( $actionParams );
 						$tagCheck = count( array_diff( $params, $appliedTags ) ) === 0;
 						if ( !$tagCheck ) {
-							$expectedTags = $wgLang->commaList( $params );
-							$actualTags = $wgLang->commaList( $appliedTags );
+							$expectedTags = implode( ', ', $params );
+							$actualTags = implode( ', ', $appliedTags );
 
-							$testErrorMessage = "Expected the edit to have the following tags: $expectedTags. " .
+							$testErrorMessage = "Expected the action to have the following tags: $expectedTags. " .
 								"Got the following instead: $actualTags.";
 						}
 						break;
 					case 'throttle':
-						// The action was executed twice and $result is an array of two Status objects.
-						if ( !$result[0]->isGood() ) {
-							// The first one should be fine
-							$testErrorMessage = "The first edit should have been saved, being only throttled.";
-							break;
-						}
-
-							$result = $result[1];
-						break;
+						throw new UnexpectedValueException( 'Use self::testThrottleConsequence to test throttling' );
+					default:
+						throw new UnexpectedValueException( 'Consequence not recognized.' );
 				}
 
 				if ( $testErrorMessage ) {
-					$this->fail( "$testErrorMessage Test description: $testDescription" );
+					$this->fail( $testErrorMessage );
 				}
-			}
-		}
-
-		if ( in_array( 'hitThrottleLimit', $options ) ) {
-			$dbr = wfGetDB( DB_REPLICA );
-			$throttled = true;
-			foreach ( $createIds as $filter ) {
-				$curThrottle = $dbr->selectField(
-					'abuse_filter',
-					'af_throttled',
-					[ 'af_id' => $filter ],
-					__METHOD__
-				);
-				$throttled &= $curThrottle;
-			}
-
-			if ( !$throttled ) {
-				$expectedThrottled = $wgLang->commaList( $createIds );
-				$this->fail( 'Expected the following filters to be automatically ' .
-					"throttled: $expectedThrottled." );
 			}
 		}
 
@@ -685,232 +735,1315 @@ class AbuseFilterConsequencesTest extends MediaWikiTestCase {
 			}
 		}
 
-		$expectedDisplay = $wgLang->commaList( $expected );
-		$actualDisplay = $wgLang->commaList( $actual );
+		return [ $expected, $actual ];
+	}
+
+	/**
+	 * Creates new filters, execute an action and check the consequences
+	 *
+	 * @param int[] $createIds IDs of the filters to create
+	 * @param array $actionParams Details of the action we need to execute to trigger filters
+	 * @param array $consequences The consequences we're expecting
+	 * @dataProvider provideFilters
+	 */
+	public function testFilterConsequences( $createIds, $actionParams, $consequences ) {
+		self::createFilters( $createIds );
+		$result = $this->doAction( $actionParams );
+		list( $expected, $actual ) = $this->checkConsequences( $result, $actionParams, $consequences );
+
+		$expectedDisplay = implode( ', ', $expected );
+		$actualDisplay = implode( ', ', $actual );
 
 		$this->assertEquals(
 			$expected,
 			$actual,
-			"The edit should have returned the following error messages: $expectedDisplay. " .
-				"Got $actualDisplay instead. Test description: $testDescription"
+			"The action should have returned the following error messages: $expectedDisplay. " .
+			"Got $actualDisplay instead."
 		);
 	}
 
 	/**
-	 * Data provider for creating and editing filters. For every test case, we pass
+	 * Data provider for testFilterConsequences. For every test case, we pass
 	 *   - an array with the IDs of the filters to be created (listed in self::$filters),
 	 *   - an array with details of the action to execute in order to trigger the filters,
 	 *   - an array of expected consequences of the form
 	 *       [ 'consequence name' => [ IDs of the filter to take its parameters from ] ]
 	 *       Such IDs may be more than one if we have a warning that is shown twice.
-	 *   - an array with further options for testing
 	 *
 	 * @return array
 	 */
 	public function provideFilters() {
 		return [
-			[
-				'Basic test for "edit" action.',
+			'Basic test for "edit" action' => [
 				[ 1, 2 ],
 				[
-					'edit',
-					'Test page',
+					'action' => 'edit',
+					'target' => 'Test page',
 					'oldText' => 'Some old text for the test.',
 					'newText' => 'I like foo',
 					'summary' => 'Test AbuseFilter for edit action.'
 				],
-				[ 'warn'  => [ 1 ] ],
-				[]
+				[ 'warn'  => [ 1 ] ]
 			],
-			[
-				'Basic test for "move" action.',
+			'Basic test for "move" action' => [
 				[ 2 ],
 				[
-					'move',
-					'Test page',
+					'action' => 'move',
+					'target' => 'Test page',
 					'newTitle' => 'Another test page'
 				],
-				[ 'disallow'  => [ 2 ], 'block' => [ 2 ] ],
-				[]
+				[ 'disallow'  => [ 2 ], 'block' => [ 2 ] ]
 			],
-			[
-				'Basic test for "delete" action.',
+			'Basic test for "delete" action' => [
 				[ 2, 3 ],
 				[
-					'delete',
-					'Test page'
+					'action' => 'delete',
+					'target' => 'Test page'
 				],
-				[ 'degroup' => [ 3 ] ],
-				[]
+				[ 'degroup' => [ 3 ] ]
 			],
-			[
-				'Basic test for "createaccount" action.',
+			'Basic test for "createaccount", no consequences.' => [
 				[ 1, 2, 3, 4 ],
 				[
-					'createaccount',
-					null,
+					'action' => 'createaccount',
+					'target' => 'User:AnotherUser',
 					'username' => 'AnotherUser'
 				],
-				[],
 				[]
 			],
-			[
-				'Test to check that all tags are applied.',
+			'Basic test for "createaccount", disallowed.' => [
+				[ 15 ],
+				[
+					'action' => 'createaccount',
+					'target' => 'User:AnotherUser',
+					'username' => 'AnotherUser'
+				],
+				[ 'disallow' => [ 15 ] ]
+			],
+			'Check that all tags are applied' => [
 				[ 5 ],
 				[
-					'edit',
-					'User:FilteredUser',
+					'action' => 'edit',
+					'target' => 'User:FilteredUser',
 					'oldText' => 'Hey.',
 					'newText' => 'I am a very nice user, really!',
 					'summary' => ''
 				],
-				[ 'tag' => [ 5 ] ],
-				[]
+				[ 'tag' => [ 5 ] ]
 			],
 			[
-				'Test to check that the edit is disallowed.',
 				[ 6 ],
 				[
-					'edit',
-					'Help:Help',
+					'action' => 'edit',
+					'target' => 'Help:Help',
 					'oldText' => 'Some help.',
 					'newText' => 'Some help for you',
 					'summary' => 'Help! I need somebody'
 				],
-				[ 'disallow' => [ 6 ] ],
-				[]
+				[ 'disallow' => [ 6 ] ]
 			],
-			[
-				'Test to check that degroup and block are executed together.',
+			'Check that degroup and block are executed together' => [
 				[ 2, 3, 7, 8 ],
 				[
-					'edit',
-					'Link',
+					'action' => 'edit',
+					'target' => 'Link',
 					'oldText' => 'What is a link?',
 					'newText' => 'A link is something like this: [[Link|]].',
 					'summary' => 'Explaining'
 				],
-				[ 'degroup' => [ 7 ], 'block' => [ 8 ] ],
-				[]
+				[ 'degroup' => [ 7 ], 'block' => [ 8 ] ]
 			],
-			[
-				'Test to check that the block duration is the longest one.',
+			'Check that the block duration is the longer one' => [
 				[ 8, 9 ],
 				[
-					'edit',
-					'Whatever',
+					'action' => 'edit',
+					'target' => 'Whatever',
 					'oldText' => 'Whatever is whatever',
 					'newText' => 'Whatever is whatever, whatever it is. BTW, here is a [[Link|]]',
 					'summary' => 'Whatever'
 				],
-				[ 'disallow' => [ 8 ], 'block' => [ 8 ] ],
-				[]
+				[ 'disallow' => [ 8 ], 'block' => [ 8 ] ]
 			],
-			[
-				'Test to check that throttled filters only execute "safe" actions.',
+			'Check that throttled filters only execute "safe" actions' => [
 				[ 10 ],
 				[
-					'edit',
-					'Buffalo',
+					'action' => 'edit',
+					'target' => 'Buffalo',
 					'oldText' => 'Buffalo',
 					'newText' => 'Buffalo buffalo Buffalo buffalo buffalo buffalo Buffalo buffalo.',
 					'summary' => 'Buffalo!'
 				],
-				[ 'tag' => [ 10 ] ],
-				[]
+				[ 'tag' => [ 10 ] ]
 			],
-			[
-				'Test to see that throttling works well.',
-				[ 11 ],
-				[
-					'edit',
-					'Throttle',
-					'oldText' => 'What is throttle?',
-					'firstNewText' => 'Throttle is something that should happen...',
-					'secondNewText' => '... Right now!',
-					'summary' => 'Throttle'
-				],
-				[ 'throttle' => [ 11 ], 'disallow' => [ 11 ] ],
-				[ 'makeGoodEditFirst' ]
-			],
-			[
-				'Test to check that degroup and block are both executed and degroup warning is shown twice.',
+			'Check that degroup and block are both executed and degroup warning is shown twice' => [
 				[ 1, 3, 7, 12 ],
 				[
-					'edit',
-					'User:FilteredUser',
+					'action' => 'edit',
+					'target' => 'User:FilteredUser',
 					'oldText' => '',
 					'newText' => 'A couple of lines about me...',
 					'summary' => 'My user page'
 				],
-				[ 'block' => [ 12 ], 'degroup' => [ 7, 12 ] ],
-				[]
+				[ 'block' => [ 12 ], 'degroup' => [ 7, 12 ] ]
 			],
-			[
-				'Test to check that every throttled filter only executes "safe" actions.',
+			'Check that every throttled filter only executes "safe" actions' => [
 				[ 10, 13 ],
 				[
-					'edit',
-					'Tyger! Tyger! Burning bright',
+					'action' => 'edit',
+					'target' => 'Tyger! Tyger! Burning bright',
 					'oldText' => 'In the forests of the night',
 					'newText' => 'What immortal hand or eye',
 					'summary' => 'Could frame thy fearful symmetry?'
 				],
-				[ 'tag' => [ 10 ] ],
-				[]
+				[ 'tag' => [ 10 ] ]
 			],
-			[
-				'Test to check that runtime exceptions (division by zero) are correctly handled.',
+			'Check that runtime exceptions (division by zero) are correctly handled' => [
 				[ 14 ],
 				[
-					'edit',
-					'0',
+					'action' => 'edit',
+					'target' => '0',
 					'oldText' => 'Old text',
 					'newText' => 'New text',
 					'summary' => 'Some summary'
 				],
-				[],
 				[]
 			],
 			[
-				'Test to check that the conditions limit works.',
 				[ 8, 10 ],
 				[
-					'edit',
-					'Anything',
+					'action' => 'edit',
+					'target' => 'Anything',
 					'oldText' => 'Bar',
 					'newText' => 'Foo',
 					'summary' => ''
 				],
-				[],
-				[ 'hitCondsLimit' ]
+				[]
 			],
 			[
-				'Test slow executions.',
 				[ 7, 12 ],
 				[
-					'edit',
-					'Something',
+					'action' => 'edit',
+					'target' => 'Something',
 					'oldText' => 'Please allow me',
 					'newText' => 'to introduce myself',
 					'summary' => ''
 				],
-				[ 'degroup' => [ 7 ] ],
-				[ 'hitTimeLimit' ]
+				[ 'degroup' => [ 7 ] ]
 			],
 			[
-				'Test throttling a dangerous filter.',
 				[ 13 ],
 				[
-					'edit',
-					'My page',
+					'action' => 'edit',
+					'target' => 'My page',
 					'oldText' => '',
 					'newText' => 'AbuseFilter will not block me',
 					'summary' => ''
 				],
-				[],
-				[ 'hitThrottleLimit' ]
+				[]
 			],
+		];
+	}
+
+	/**
+	 * Check that hitting the conditions limit stops the execution, and thus no actions are taken.
+	 *
+	 * @param int[] $createIds IDs of the filters to create
+	 * @param array $actionParams Details of the action we need to execute to trigger filters
+	 * @covers AbuseFilterParser::getCondCount
+	 * @covers AbuseFilterParser::raiseCondCount
+	 * @covers AbuseFilter::checkAllFilters
+	 * @dataProvider provideFiltersNoConsequences
+	 */
+	public function testCondsLimit( $createIds, $actionParams ) {
+		self::createFilters( $createIds );
+		$this->setMwGlobals( [ 'wgAbuseFilterConditionLimit' => 0 ] );
+		$res = $this->doAction( $actionParams );
+
+		$this->assertTrue( $res->isGood(), 'The action should succeed when testing the conds limit' );
+		$appliedTags = $this->getActionTags( $actionParams );
+		$this->assertContains(
+			'abusefilter-condition-limit',
+			$appliedTags,
+			"The action wasn't tagged with 'abusefilter-condition-limit' upon hitting the limit"
+		);
+	}
+
+	/**
+	 * Check that hitting the time limit is logged
+	 *
+	 * @param int[] $createIds IDs of the filters to create
+	 * @param array $actionParams Details of the action we need to execute to trigger filters
+	 * @covers AbuseFilter::checkFilter
+	 * @covers AbuseFilter::recordSlowFilter
+	 * @dataProvider provideFiltersNoConsequences
+	 */
+	public function testTimeLimit( $createIds, $actionParams ) {
+		$loggerMock = new TestLogger();
+		$loggerMock->setCollect( true );
+		$this->setLogger( 'AbuseFilter', $loggerMock );
+		$this->setMwGlobals( [ 'wgAbuseFilterSlowFilterRuntimeLimit' => -1 ] );
+
+		self::createFilters( $createIds );
+		// We don't care about consequences here
+		$this->doAction( $actionParams );
+
+		// Ensure slow filters are logged
+		$loggerBuffer = $loggerMock->getBuffer();
+		$found = false;
+		foreach ( $loggerBuffer as $entry ) {
+			$check = preg_match( '/Edit filter [^ ]+ on [^ ]+ is taking longer than expected/', $entry[1] );
+			if ( $check ) {
+				$found = true;
+				break;
+			}
+		}
+		$this->assertTrue( $found, 'The time limit hit was not logged.' );
+	}
+
+	/**
+	 * Similar to self::provideFilters, but for tests where we don't care about consequences.
+	 *
+	 * @return array
+	 */
+	public function provideFiltersNoConsequences() {
+		return [
+			[
+				[ 1, 2 ],
+				[
+					'action' => 'edit',
+					'target' => 'Test page',
+					'oldText' => 'Some old text for the test.',
+					'newText' => 'I like foo',
+					'summary' => 'Test AbuseFilter for edit action.'
+				]
+			],
+			[
+				[ 2 ],
+				[
+					'action' => 'move',
+					'target' => 'Test page',
+				]
+			],
+			[
+				[ 5 ],
+				[
+					'action' => 'edit',
+					'target' => 'User:FilteredUser',
+					'oldText' => 'Hey.',
+					'newText' => 'I am a very nice user, really!',
+					'summary' => ''
+				]
+			],
+			[
+				[ 2, 3, 7, 8 ],
+				[
+					'action' => 'edit',
+					'target' => 'Link',
+					'oldText' => 'What is a link?',
+					'newText' => 'A link is something like this: [[Link|]].',
+					'summary' => 'Explaining'
+				]
+			],
+			[
+				[ 8, 10 ],
+				[
+					'action' => 'edit',
+					'target' => 'Anything',
+					'oldText' => 'Bar',
+					'newText' => 'Foo',
+					'summary' => ''
+				]
+			],
+			[
+				[ 2, 3 ],
+				[
+					'action' => 'delete',
+					'target' => 'Test page'
+				]
+			],
+			[
+				[ 10, 13 ],
+				[
+					'action' => 'edit',
+					'target' => 'Tyger! Tyger! Burning bright',
+					'oldText' => 'In the forests of the night',
+					'newText' => 'What immortal hand or eye',
+					'summary' => 'Could frame thy fearful symmetry?'
+				]
+			],
+			[
+				[ 15 ],
+				[
+					'action' => 'createaccount',
+					'target' => 'User:AnotherUser',
+					'username' => 'AnotherUser'
+				]
+			]
+		];
+	}
+
+	/**
+	 * Check that hitting the throttle effectively updates abuse_filter.af_throttled.
+	 *
+	 * @param int[] $createIds IDs of the filters to create
+	 * @param array $actionParams Details of the action we need to execute to trigger filters
+	 * @covers AbuseFilter::checkEmergencyDisable
+	 * @dataProvider provideThrottleLimitFilters
+	 */
+	public function testThrottleLimit( $createIds, $actionParams ) {
+		self::createFilters( $createIds );
+		$this->setMwGlobals( [ 'wgAbuseFilterEmergencyDisableCount' => [ 'default' => -1 ] ] );
+		// We don't care about consequences here
+		$this->doAction( $actionParams );
+
+		$throttled = [];
+		foreach ( $createIds as $filter ) {
+			$curThrottle = $this->db->selectField(
+				'abuse_filter',
+				'af_throttled',
+				[ 'af_id' => $filter ],
+				__METHOD__
+			);
+			if ( $curThrottle ) {
+				$throttled[] = $filter;
+			}
+		}
+
+		$expectedThrottled = implode( ', ', $createIds );
+		$actualThrottled = implode( ', ', $throttled );
+		$this->assertEquals( $createIds, $throttled, "Expected the following filters to be " .
+			"automatically throttled: $expectedThrottled. The following are throttled instead: " .
+			"$actualThrottled." );
+	}
+
+	/**
+	 * Data provider for testThrottleLimit. Note that using filters with af_throttled = 1 in
+	 * self::$filters makes the test case useless.
+	 *
+	 * @return array
+	 */
+	public function provideThrottleLimitFilters() {
+		return [
+			[
+				[ 1 ],
+				[
+					'action' => 'edit',
+					'target' => 'Test page',
+					'oldText' => 'Some old text for the test.',
+					'newText' => 'I like foo',
+					'summary' => 'Test AbuseFilter for edit action.'
+				]
+			],
+			[
+				[ 2 ],
+				[
+					'action' => 'move',
+					'target' => 'Test page',
+					'newTitle' => 'Another test page'
+				]
+			],
+			[
+				[ 5 ],
+				[
+					'action' => 'edit',
+					'target' => 'User:FilteredUser',
+					'oldText' => 'Hey.',
+					'newText' => 'I am a very nice user, really!',
+					'summary' => ''
+				]
+			],
+			[
+				[ 7, 8 ],
+				[
+					'action' => 'edit',
+					'target' => 'Link',
+					'oldText' => 'What is a link?',
+					'newText' => 'A link is something like this: [[Link|]].',
+					'summary' => 'Explaining'
+				]
+			],
+			[
+				[ 3 ],
+				[
+					'action' => 'delete',
+					'target' => 'Test page'
+				]
+			],
+			[
+				[ 15 ],
+				[
+					'action' => 'createaccount',
+					'target' => 'User:AnotherUser',
+					'username' => 'AnotherUser'
+				]
+			]
+		];
+	}
+
+	/**
+	 * Check an array of results from self::doAction to ensure that all but the last actions have been
+	 *   executed (i.e. no errors).
+	 * @param Status[] $results As returned by self::doActions
+	 * @return Status The Status of the last action, to be later checked with self::checkConsequences
+	 */
+	private function checkThrottleConsequence( $results ) {
+		$finalRes = array_pop( $results );
+		foreach ( $results as $result ) {
+			if ( !$result->isGood() ) {
+				$this->fail( 'Only the last actions should have triggered a filter; the other ones ' .
+				'should have been allowed.' );
+			}
+		}
+
+		return $finalRes;
+	}
+
+	/**
+	 * Like self::testFilterConsequences but for throttle, which deserves a special treatment
+	 *
+	 * @param int[] $createIds IDs of the filters to create
+	 * @param array[] $actionsParams Details of the action we need to execute to trigger filters
+	 * @param array $consequences The consequences we're expecting
+	 * @dataProvider provideThrottleFilters
+	 */
+	public function testThrottle( $createIds, $actionsParams, $consequences ) {
+		$this->setMwGlobals( [ 'wgMainCacheType' => 'hash' ] );
+		self::createFilters( $createIds );
+		$results = self::doActions( $actionsParams );
+		$res = $this->checkThrottleConsequence( $results );
+		$lastParams = array_pop( $actionsParams );
+		list( $expected, $actual ) = $this->checkConsequences( $res, $lastParams, $consequences );
+
+		$expectedDisplay = implode( ', ', $expected );
+		$actualDisplay = implode( ', ', $actual );
+
+		$this->assertEquals(
+			$expected,
+			$actual,
+			"The action should have returned the following error messages: $expectedDisplay. " .
+			"Got $actualDisplay instead."
+		);
+	}
+
+	/**
+	 * Data provider for testThrottle. For every test case, we pass
+	 *   - an array with the IDs of the filters to be created (listed in self::$filters),
+	 *   - an array of array, where every sub-array holds the details of the action to execute in
+	 *       order to trigger the filters, each one like in self::provideFilters
+	 *   - an array of expected consequences for the last action (i.e. after throttling) of the form
+	 *       [ 'consequence name' => [ IDs of the filter to take its parameters from ] ]
+	 *       Such IDs may be more than one if we have a warning that is shown twice.
+	 *
+	 *
+	 * @return array
+	 */
+	public function provideThrottleFilters() {
+		return [
+			'Basic test for throttling edits' => [
+				[ 11 ],
+				[
+					[
+						'action' => 'edit',
+						'target' => 'Throttle',
+						'oldText' => 'What is throttle?',
+						'newText' => 'Throttle is something that should happen...',
+						'summary' => 'Throttle'
+					],
+					[
+						'action' => 'edit',
+						'target' => 'Throttle',
+						'oldText' => 'Throttle is something that should happen...',
+						'newText' => '... Right now!',
+						'summary' => 'Throttle'
+					]
+				],
+				[ 'disallow' => [ 11 ] ]
+			],
+			'Basic test for throttling "move"' => [
+				[ 11 ],
+				[
+					[
+						'action' => 'move',
+						'target' => 'Throttle test',
+						'newTitle' => 'Another throttle test'
+					],
+					[
+						'action' => 'move',
+						'target' => 'Another throttle test',
+						'newTitle' => 'Yet another throttle test'
+					],
+				],
+				[ 'disallow' => [ 11 ] ]
+			],
+			'Basic test for throttling "delete"' => [
+				[ 11 ],
+				[
+					[
+						'action' => 'delete',
+						'target' => 'Test page'
+					],
+					[
+						'action' => 'delete',
+						'target' => 'Test page'
+					]
+				],
+				[ 'disallow' => [ 11 ] ]
+			],
+			'Basic test for throttling "createaccount"' => [
+				[ 11 ],
+				[
+					[
+						'action' => 'createaccount',
+						'target' => 'User:AnotherUser',
+						'username' => 'AnotherUser'
+					],
+					[
+						'action' => 'createaccount',
+						'target' => 'User:YetAnotherUser',
+						'username' => 'YetAnotherUser'
+					]
+				],
+				[ 'disallow' => [ 11 ] ]
+			],
+		];
+	}
+
+	/**
+	 * Test storing and loading the var dump. See also AbuseFilterTest::testVarDump
+	 *
+	 * @param int[] $createIds IDs of the filters to create
+	 * @param array $actionParams Details of the action we need to execute to trigger filters
+	 * @param string[] $usedVars The variables effectively computed by filters in $createIds.
+	 *   We'll search these in the stored dump.
+	 * @covers AbuseFilter::storeVarDump
+	 * @covers AbuseFilter::loadVarDump
+	 * @covers AbuseFilterVariableHolder::dumpAllVars
+	 * @dataProvider provideFiltersAndVariables
+	 */
+	public function testVarDump( $createIds, $actionParams, $usedVars ) {
+		self::createFilters( $createIds );
+		// We don't care about consequences here
+		$this->doAction( $actionParams );
+
+		$dbw = wfGetDB( DB_MASTER );
+		// We just take a dump from a single filters, as they're all identical for the same action
+		$dumpID = $dbw->selectField(
+			'abuse_filter_log',
+			'afl_var_dump',
+			'',
+			__METHOD__,
+			[ 'ORDER BY' => 'afl_timestamp DESC' ]
+		);
+
+		$vars = AbuseFilter::loadVarDump( $dumpID )->getVars();
+
+		$interestingVars = array_intersect_key( $vars, array_fill_keys( $usedVars, true ) );
+
+		sort( $usedVars );
+		ksort( $interestingVars );
+		$this->assertEquals(
+			$usedVars,
+			array_keys( $interestingVars ),
+			"The saved variables aren't the expected ones."
+		);
+		$this->assertContainsOnlyInstancesOf(
+			AFPData::class,
+			$interestingVars,
+			'Some variables have not been computed.'
+		);
+	}
+
+	/**
+	 * Data provider for testVarDump
+	 *
+	 * @return array
+	 */
+	public function provideFiltersAndVariables() {
+		return [
+			[
+				[ 1, 2 ],
+				[
+					'action' => 'edit',
+					'target' => 'Test page',
+					'oldText' => 'Some old text for the test.',
+					'newText' => 'I like foo',
+					'summary' => 'Test AbuseFilter for edit action.'
+				],
+				[ 'added_lines', 'action' ]
+			],
+			[
+				[ 1, 2 ],
+				[
+					'action' => 'stashedit',
+					'target' => 'Test page',
+					'oldText' => 'Some old text for the test.',
+					'newText' => 'I like foo',
+					'summary' => 'Test AbuseFilter for edit action.',
+					'stashType' => 'hit'
+				],
+				[ 'added_lines', 'action' ]
+			],
+			[
+				[ 1, 2 ],
+				[
+					'action' => 'stashedit',
+					'target' => 'Test page',
+					'oldText' => 'Some old text for the test.',
+					'newText' => 'I like foo',
+					'summary' => 'Test AbuseFilter for edit action.',
+					'stashType' => 'miss'
+				],
+				[ 'added_lines', 'action' ]
+			],
+			[
+				[ 2 ],
+				[
+					'action' => 'move',
+					'target' => 'Test page',
+					'newTitle' => 'Another test page'
+				],
+				[ 'action', 'moved_to_title' ]
+			],
+			[
+				[ 5 ],
+				[
+					'action' => 'edit',
+					'target' => 'User:FilteredUser',
+					'oldText' => 'Hey.',
+					'newText' => 'I am a very nice user, really!',
+					'summary' => ''
+				],
+				[ 'user_name' ]
+			],
+			[
+				[ 2, 3, 7, 8 ],
+				[
+					'action' => 'edit',
+					'target' => 'Link',
+					'oldText' => 'What is a link?',
+					'newText' => 'A link is something like this: [[Link|]].',
+					'summary' => 'Explaining'
+				],
+				[ 'action', 'timestamp', 'added_lines_pst' ]
+			],
+			[
+				[ 2, 3, 7, 8 ],
+				[
+					'action' => 'stashedit',
+					'target' => 'Link',
+					'oldText' => 'What is a link?',
+					'newText' => 'A link is something like this: [[Link|]].',
+					'summary' => 'Explaining',
+					'stashType' => 'hit'
+				],
+				[ 'action', 'timestamp', 'added_lines_pst' ]
+			],
+			[
+				[ 2, 3, 7, 8 ],
+				[
+					'action' => 'stashedit',
+					'target' => 'Link',
+					'oldText' => 'What is a link?',
+					'newText' => 'A link is something like this: [[Link|]].',
+					'summary' => 'Explaining',
+					'stashType' => 'miss'
+				],
+				[ 'action', 'timestamp', 'added_lines_pst' ]
+			],
+			[
+				[ 8, 10 ],
+				[
+					'action' => 'edit',
+					'target' => 'Anything',
+					'oldText' => 'Bar',
+					'newText' => 'Foo',
+					'summary' => ''
+				],
+				[ 'added_lines_pst' ]
+			],
+			[
+				[ 2, 3 ],
+				[
+					'action' => 'delete',
+					'target' => 'Test page'
+				],
+				[ 'action', 'page_prefixedtitle' ]
+			],
+			[
+				[ 10, 13 ],
+				[
+					'action' => 'edit',
+					'target' => 'Tyger! Tyger! Burning bright',
+					'oldText' => 'In the forests of the night',
+					'newText' => 'What immortal hand or eye',
+					'summary' => 'Could frame thy fearful symmetry?'
+				],
+				[]
+			],
+			[
+				[ 15 ],
+				[
+					'action' => 'createaccount',
+					'target' => 'User:AnotherUser',
+					'username' => 'AnotherUser'
+				],
+				[ 'action' ]
+			],
+			[
+				[ 16 ],
+				[
+					'action' => 'edit',
+					'target' => 'Random',
+					'oldText' => 'Old text',
+					'newText' => 'Some new text which will not match',
+					'summary' => 'No summary'
+				],
+				[ 'edit_diff_pst', 'new_pst', 'new_html' ]
+			],
+			[
+				[ 16 ],
+				[
+					'action' => 'stashedit',
+					'target' => 'Random',
+					'oldText' => 'Old text',
+					'newText' => 'Some new text which will not match',
+					'summary' => 'No summary',
+					'stashType' => 'miss'
+				],
+				[ 'edit_diff_pst', 'new_pst', 'new_html' ]
+			],
+			[
+				[ 16 ],
+				[
+					'action' => 'stashedit',
+					'target' => 'Random',
+					'oldText' => 'Old text',
+					'newText' => 'Some new text which will not match',
+					'summary' => 'No summary',
+					'stashType' => 'hit'
+				],
+				[ 'edit_diff_pst', 'new_pst', 'new_html' ]
+			],
+		];
+	}
+
+	/**
+	 * Same as testFilterConsequences but only for stashed edits
+	 *
+	 * @param string $type Either "hit" or "miss". The former saves the edit from stash, the second
+	 *   stashes the edit but doesn't reuse it.
+	 * @param int[] $createIds IDs of the filters to create
+	 * @param array $actionParams Details of the action we need to execute to trigger filters
+	 * @param array $consequences The consequences we're expecting
+	 * @dataProvider provideStashedEdits
+	 */
+	public function testStashedEdit( $type, $createIds, $actionParams, $consequences ) {
+		if ( $type !== 'hit' && $type !== 'miss' ) {
+			throw new InvalidArgumentException( '$type must be either "hit" or "miss"' );
+		}
+		// Add some info in actionParams identical for all tests
+		$actionParams['action'] = 'stashedit';
+		$actionParams['stashType'] = $type;
+
+		$loggerMock = new TestLogger();
+		$loggerMock->setCollect( true );
+		$this->setLogger( 'StashEdit', $loggerMock );
+
+		self::createFilters( $createIds );
+		$result = $this->doAction( $actionParams );
+
+		// Check that we stored the edit and then hit/missed the cache
+		$foundStore = false;
+		$foundHitOrMiss = false;
+		// The conversion back and forth is needed because if the wiki language is not english
+		// the given namespace has been localized and thus wouldn't match.
+		$title = Title::newFromText( $actionParams['target'] )->getPrefixedText();
+		foreach ( $loggerMock->getBuffer() as $entry ) {
+			if ( preg_match( "/AbuseFilter::filterAction: cache $type for '$title'/", $entry[1] ) ) {
+				$foundHitOrMiss = true;
+			}
+			if ( preg_match( "/AbuseFilter::filterAction: cache store for '$title'/", $entry[1] ) ) {
+				$foundStore = true;
+			}
+			if ( $foundStore && $foundHitOrMiss ) {
+				break;
+			}
+		}
+		if ( !$foundStore ) {
+			$this->fail( 'Did not store the edit in cache as expected for a stashed edit.' );
+		} elseif ( !$foundHitOrMiss ) {
+			$this->fail( "Did not $type the cache as expected for a stashed edit." );
+		}
+
+		list( $expected, $actual ) = $this->checkConsequences( $result, $actionParams, $consequences );
+
+		$expectedDisplay = implode( ', ', $expected );
+		$actualDisplay = implode( ', ', $actual );
+
+		$this->assertEquals(
+			$expected,
+			$actual,
+			"The action should have returned the following error messages: $expectedDisplay. " .
+			"Got $actualDisplay instead."
+		);
+	}
+
+	/**
+	 * Data provider for testStashedEdit
+	 *
+	 * @return array
+	 */
+	public function provideStashedEdits() {
+		$sets = [
+			[
+				[ 1, 2 ],
+				[
+					'target' => 'Test page',
+					'oldText' => 'Some old text for the test.',
+					'newText' => 'I like foo',
+					'summary' => 'Test AbuseFilter for edit action.'
+				],
+				[ 'warn'  => [ 1 ] ]
+			],
+			[
+				[ 5 ],
+				[
+					'target' => 'User:FilteredUser',
+					'oldText' => 'Hey.',
+					'newText' => 'I am a very nice user, really!',
+					'summary' => ''
+				],
+				[ 'tag' => [ 5 ] ]
+			],
+			[
+				[ 6 ],
+				[
+					'target' => 'Help:Help',
+					'oldText' => 'Some help.',
+					'newText' => 'Some help for you',
+					'summary' => 'Help! I need somebody'
+				],
+				[ 'disallow' => [ 6 ] ]
+			],
+			[
+				[ 2, 3, 7, 8 ],
+				[
+					'target' => 'Link',
+					'oldText' => 'What is a link?',
+					'newText' => 'A link is something like this: [[Link|]].',
+					'summary' => 'Explaining'
+				],
+				[ 'degroup' => [ 7 ], 'block' => [ 8 ] ]
+			],
+			[
+				[ 8, 9 ],
+				[
+					'target' => 'Whatever',
+					'oldText' => 'Whatever is whatever',
+					'newText' => 'Whatever is whatever, whatever it is. BTW, here is a [[Link|]]',
+					'summary' => 'Whatever'
+				],
+				[ 'disallow' => [ 8 ], 'block' => [ 8 ] ]
+			],
+			[
+				[ 10 ],
+				[
+					'target' => 'Buffalo',
+					'oldText' => 'Buffalo',
+					'newText' => 'Buffalo buffalo Buffalo buffalo buffalo buffalo Buffalo buffalo.',
+					'summary' => 'Buffalo!'
+				],
+				[ 'tag' => [ 10 ] ]
+			],
+			[
+				[ 1, 3, 7, 12 ],
+				[
+					'target' => 'User:FilteredUser',
+					'oldText' => '',
+					'newText' => 'A couple of lines about me...',
+					'summary' => 'My user page'
+				],
+				[ 'block' => [ 12 ], 'degroup' => [ 7, 12 ] ]
+			],
+			[
+				[ 10, 13 ],
+				[
+					'target' => 'Tyger! Tyger! Burning bright',
+					'oldText' => 'In the forests of the night',
+					'newText' => 'What immortal hand or eye',
+					'summary' => 'Could frame thy fearful symmetry?'
+				],
+				[ 'tag' => [ 10 ] ]
+			],
+			[
+				[ 14 ],
+				[
+					'target' => '0',
+					'oldText' => 'Old text',
+					'newText' => 'New text',
+					'summary' => 'Some summary'
+				],
+				[]
+			],
+			[
+				[ 8, 10 ],
+				[
+					'target' => 'Anything',
+					'oldText' => 'Bar',
+					'newText' => 'Foo',
+					'summary' => ''
+				],
+				[]
+			],
+			[
+				[ 7, 12 ],
+				[
+					'target' => 'Something',
+					'oldText' => 'Please allow me',
+					'newText' => 'to introduce myself',
+					'summary' => ''
+				],
+				[ 'degroup' => [ 7 ] ]
+			],
+			[
+				[ 13 ],
+				[
+					'target' => 'My page',
+					'oldText' => '',
+					'newText' => 'AbuseFilter will not block me',
+					'summary' => ''
+				],
+				[]
+			],
+		];
+
+		$finalSets = [];
+		foreach ( $sets as $set ) {
+			// Test both successfully saving a stashed edit and stashing the edit but re-executing filters
+			$finalSets[] = array_merge( [ 'miss' ], $set );
+			$finalSets[] = array_merge( [ 'hit' ], $set );
+		}
+		return $finalSets;
+	}
+
+	/**
+	 * Test filter profiling, both for total and per-filter stats. NOTE: This test performs several
+	 * actions for every test set, and is thus HEAVY.
+	 *
+	 * @param int[] $createIds IDs of the filters to create
+	 * @param array $actionParams Details of the action we need to execute to trigger filters
+	 * @param array $expectedGlobal Expected global stats
+	 * @param array $expectedPerFilter Expected stats for every created filter
+	 * @covers AbuseFilter::filterMatchesKey
+	 * @covers AbuseFilter::filterUsedKey
+	 * @covers AbuseFilter::filterLimitReachedKey
+	 * @covers AbuseFilter::getFilterProfile
+	 * @covers AbuseFilter::checkAllFilters
+	 * @covers AbuseFilter::recordStats
+	 * @covers AbuseFilter::checkEmergencyDisable
+	 * @dataProvider provideProfilingFilters
+	 */
+	public function testProfiling( $createIds, $actionParams, $expectedGlobal, $expectedPerFilter ) {
+		$this->setMwGlobals( [
+			'wgAbuseFilterConditionLimit' => $actionParams[ 'condsLimit' ]
+		] );
+		self::createFilters( $createIds );
+		for ( $i = 1; $i <= $actionParams['repeatAction'] - 1; $i++ ) {
+			// First make some other actions to increase stats
+			// @ToDo This doesn't works well with account creations
+			$this->doAction( $actionParams );
+			$actionParams['target'] .= $i;
+		}
+		// This is the magic value used by filter 16 to change the amount of used condition
+		MWTimestamp::setFakeTime( self::MAGIC_TIMESTAMP );
+		// We don't care about consequences here
+		$this->doAction( $actionParams );
+		MWTimestamp::setFakeTime( false );
+
+		$stash = MediaWikiServices::getInstance()->getMainObjectStash();
+		// Global stats shown on the top of Special:AbuseFilter
+		$actualGlobalStats = [
+			'totalMatches' => $stash->get( AbuseFilter::filterMatchesKey() ),
+			'totalActions' => $stash->get( AbuseFilter::filterUsedKey( 'default' ) ),
+			'totalOverflows' => $stash->get( AbuseFilter::filterLimitReachedKey() )
+		];
+		$this->assertSame(
+			$expectedGlobal,
+			$actualGlobalStats,
+			'Global profiling stats are not computed correctly.'
+		);
+
+		// Per-filter stats shown on the top of Special:AbuseFilter/xxx
+		foreach ( $createIds as $id ) {
+			$actualStats = [
+				'matches' => $stash->get( AbuseFilter::filterMatchesKey( $id ) ),
+				'actions' => $stash->get( AbuseFilter::filterUsedKey( 'default' ) ),
+				'averageConditions' => AbuseFilter::getFilterProfile( $id )[1]
+			];
+			$this->assertSame(
+				$expectedPerFilter[ $id ],
+				$actualStats,
+				"Profiling stats are not computed correctly for filter $id."
+			);
+		}
+	}
+
+	/**
+	 * Data provider for testProfiling. We only want filters which let the edit pass, since
+	 * we'll perform multiple edits. How this test works: we repeat the action X times. For 1 to
+	 * X - 1, it would take 1 + 1 + 5 + 1 conditions, but it will overflow without checking filter
+	 * 19 (since the conds limit is 7). Then we perform the last execution using a trick that will
+	 * make filter 17 only consume 1 condition.
+	 *
+	 * @todo All these values should be more customizable, or just hardcoded in the test method.
+	 *
+	 * @return array
+	 */
+	public function provideProfilingFilters() {
+		return [
+			'Basic test for statistics recording on edit.' => [
+				[ 4, 5, 17, 19 ],
+				[
+					'action' => 'edit',
+					'target' => 'Some page',
+					'oldText' => 'Some old text',
+					'newText' => 'Some new text',
+					'summary' => 'Some summary',
+					'condsLimit' => 7,
+					'repeatAction' => 6
+				],
+				[
+					'totalMatches' => 6,
+					'totalActions' => 6,
+					'totalOverflows' => 5
+				],
+				[
+					4 => [
+						'matches' => 0,
+						'actions' => 6,
+						'averageConditions' => 1.0
+					],
+					5 => [
+						'matches' => 6,
+						'actions' => 6,
+						'averageConditions' => 1.0
+					],
+					17 => [
+						'matches' => 1,
+						'actions' => 6,
+						'averageConditions' => 4.0
+					],
+					19 => [
+						'matches' => 1,
+						'actions' => 6,
+						'averageConditions' => 1.0
+					],
+				]
+			],
+			'Test for statistics recording on a successfully stashed edit.' => [
+				[ 4, 5, 17, 19 ],
+				[
+					'action' => 'stashedit',
+					'target' => 'Some page',
+					'oldText' => 'Some old text',
+					'newText' => 'Some new text',
+					'summary' => 'Some summary',
+					'stashType' => 'hit',
+					'condsLimit' => 7,
+					'repeatAction' => 6
+				],
+				[
+					'totalMatches' => 6,
+					'totalActions' => 6,
+					'totalOverflows' => 5
+				],
+				[
+					4 => [
+						'matches' => 0,
+						'actions' => 6,
+						'averageConditions' => 1.0
+					],
+					5 => [
+						'matches' => 6,
+						'actions' => 6,
+						'averageConditions' => 1.0
+					],
+					17 => [
+						'matches' => 1,
+						'actions' => 6,
+						'averageConditions' => 4.0
+					],
+					19 => [
+						'matches' => 1,
+						'actions' => 6,
+						'averageConditions' => 1.0
+					],
+				]
+			],
+			'Test for statistics recording on an unsuccessfully stashed edit.' => [
+				[ 4, 5, 17, 19 ],
+				[
+					'action' => 'stashedit',
+					'target' => 'Some page',
+					'oldText' => 'Some old text',
+					'newText' => 'Some new text',
+					'summary' => 'Some summary',
+					'stashType' => 'miss',
+					'condsLimit' => 7,
+					'repeatAction' => 6
+				],
+				[
+					'totalMatches' => 6,
+					'totalActions' => 6,
+					'totalOverflows' => 5
+				],
+				[
+					4 => [
+						'matches' => 0,
+						'actions' => 6,
+						'averageConditions' => 1.0
+					],
+					5 => [
+						'matches' => 6,
+						'actions' => 6,
+						'averageConditions' => 1.0
+					],
+					17 => [
+						'matches' => 1,
+						'actions' => 6,
+						'averageConditions' => 4.0
+					],
+					19 => [
+						'matches' => 1,
+						'actions' => 6,
+						'averageConditions' => 1.0
+					],
+				]
+			]
+		];
+	}
+
+	/**
+	 * Tests for global filters, defined on a central wiki and executed on another (e.g. a filter
+	 *   defined on meta but triggered on another wiki using meta's global filters).
+	 *   We emulate an external database by using different tables prefixed with
+	 *   self::DB_EXTERNAL_PREFIX
+	 *
+	 * @param int[] $createIds IDs of the filters to create
+	 * @param array $actionParams Details of the action we need to execute to trigger filters
+	 * @param array $consequences The consequences we're expecting
+	 * @dataProvider provideGlobalFilters
+	 */
+	public function testGlobalFilters( $createIds, $actionParams, $consequences ) {
+		self::createFilters( $createIds, true );
+
+		$result = $this->doAction( $actionParams );
+
+		list( $expected, $actual ) = $this->checkConsequences( $result, $actionParams, $consequences );
+
+		// First check that the filter work as expected
+		$expectedDisplay = implode( ', ', $expected );
+		$actualDisplay = implode( ', ', $actual );
+		$this->assertEquals(
+			$expected,
+			$actual,
+			"The action should have returned the following error messages: $expectedDisplay. " .
+			"Got $actualDisplay instead."
+		);
+
+		// Check that the hits were logged on the "external" DB
+		$logged = $this->db->selectFieldValues(
+			self::DB_EXTERNAL_PREFIX . 'abuse_filter_log',
+			'afl_filter',
+			[ 'afl_wiki IS NOT NULL' ],
+			__METHOD__
+		);
+		// Don't use assertSame because the DB holds strings here (T42757)
+		$this->assertEquals(
+			$createIds,
+			$logged,
+			'Some filter hits were not logged in the external DB.'
+		);
+	}
+
+	/**
+	 * Data provider for testGlobalFilters
+	 *
+	 * @return array
+	 */
+	public function provideGlobalFilters() {
+		return [
+			[
+				[ 18 ],
+				[
+					'action' => 'edit',
+					'target' => 'Global',
+					'oldText' => 'Old text',
+					'newText' => 'New text',
+					'summary' => ''
+				],
+				[ 'disallow' => [ 18 ], 'warn' => [ 18 ] ]
+			],
+			[
+				[ 19 ],
+				[
+					'action' => 'edit',
+					'target' => 'A global page',
+					'oldText' => 'Foo',
+					'newText' => 'Bar',
+					'summary' => 'Baz'
+				],
+				[ 'tag' => [ 19 ] ]
+			],
+			[
+				[ 19, 20 ],
+				[
+					'action' => 'edit',
+					'target' => 'Cellar door',
+					'oldText' => '',
+					'newText' => 'Yay, that\'s cool',
+					'summary' => 'Unit test'
+				],
+				[ 'disallow' => [ 20 ] ]
+			],
+			[
+				[ 18 ],
+				[
+					'action' => 'move',
+					'target' => 'Cellar door',
+					'newTitle' => 'Attic door'
+				],
+				[ 'warn' => [ 18 ] ]
+			],
+			[
+				[ 19, 20 ],
+				[
+					'action' => 'delete',
+					'target' => 'Cellar door',
+				],
+				[ 'disallow' => [ 20 ] ]
+			],
+			[
+				[ 19 ],
+				[
+					'action' => 'stashedit',
+					'target' => 'Cellar door',
+					'oldText' => '',
+					'newText' => 'Too many doors',
+					'summary' => '',
+					'stashType' => 'hit'
+				],
+				[ 'tag' => [ 19 ] ]
+			],
+			[
+				[ 18 ],
+				[
+					'action' => 'createaccount',
+					'target' => 'User:GlobalUser',
+					'username' => 'GlobalUser'
+				],
+				[ 'warn' => [ 18 ] ]
+			]
 		];
 	}
 }

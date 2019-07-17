@@ -35,8 +35,9 @@ class AbuseFilterCachingParser extends AbuseFilterParser {
 	 * Resets the state of the parser
 	 */
 	public function resetState() {
-		$this->mVars = new AbuseFilterVariableHolder;
+		$this->mVariables = new AbuseFilterVariableHolder;
 		$this->mCur = new AFPToken();
+		$this->mCondCount = 0;
 	}
 
 	/**
@@ -103,11 +104,13 @@ class AbuseFilterCachingParser extends AbuseFilterParser {
 							case "false":
 								return new AFPData( AFPData::DBOOL, false );
 							case "null":
-								return new AFPData();
+								return new AFPData( AFPData::DNULL );
 						}
 					// Fallthrough intended
 					default:
+						// @codeCoverageIgnoreStart
 						throw new AFPException( "Unknown token provided in the ATOM node" );
+						// @codeCoverageIgnoreEnd
 				}
 			case AFPTreeNode::ARRAY_DEFINITION:
 				$items = array_map( [ $this, 'evalNode' ], $node->children );
@@ -128,12 +131,22 @@ class AbuseFilterCachingParser extends AbuseFilterParser {
 				) {
 					$result = self::$funcCache[$funcHash];
 				} else {
-					AbuseFilter::triggerLimiter();
-					$result = self::$funcCache[$funcHash] = $this->$func( $dataArgs );
+					$this->raiseCondCount();
+					$hasEmptyData = false;
+					foreach ( $dataArgs as $arg ) {
+						if ( $arg->type === AFPData::DNONE ) {
+							$hasEmptyData = true;
+						}
+					}
+					$result = self::$funcCache[$funcHash] = $hasEmptyData
+						? new AFPData( AFPData::DNONE )
+						: $this->$func( $dataArgs );
 				}
 
 				if ( count( self::$funcCache ) > 1000 ) {
+					// @codeCoverageIgnoreStart
 					self::$funcCache = [];
+					// @codeCoverageIgnoreEnd
 				}
 
 				return $result;
@@ -142,7 +155,7 @@ class AbuseFilterCachingParser extends AbuseFilterParser {
 				list( $array, $offset ) = $node->children;
 
 				$array = $this->evalNode( $array );
-				if ( $array->type != AFPData::DARRAY ) {
+				if ( $array->getType() !== AFPData::DARRAY ) {
 					throw new AFPUserVisibleException( 'notarray', $node->position, [] );
 				}
 
@@ -159,7 +172,7 @@ class AbuseFilterCachingParser extends AbuseFilterParser {
 			case AFPTreeNode::UNARY:
 				list( $operation, $argument ) = $node->children;
 				$argument = $this->evalNode( $argument );
-				if ( $operation == '-' ) {
+				if ( $operation === '-' ) {
 					return AFPData::unaryMinus( $argument );
 				}
 				return $argument;
@@ -170,7 +183,9 @@ class AbuseFilterCachingParser extends AbuseFilterParser {
 				$leftOperand = $this->evalNode( $leftOperand );
 				$rightOperand = $this->evalNode( $rightOperand );
 
-				AbuseFilter::triggerLimiter();
+				$this->raiseCondCount();
+
+				// @phan-suppress-next-line PhanParamTooMany Not every function needs the position
 				$result = AFPData::$func( $leftOperand, $rightOperand, $node->position );
 
 				return $result;
@@ -202,14 +217,16 @@ class AbuseFilterCachingParser extends AbuseFilterParser {
 					case '-':
 						return AFPData::sub( $leftOperand, $rightOperand );
 					default:
+						// @codeCoverageIgnoreStart
 						throw new AFPException( "Unknown sum-related operator: {$op}" );
+						// @codeCoverageIgnoreEnd
 				}
 
 			case AFPTreeNode::COMPARE:
 				list( $op, $leftOperand, $rightOperand ) = $node->children;
 				$leftOperand = $this->evalNode( $leftOperand );
 				$rightOperand = $this->evalNode( $rightOperand );
-				AbuseFilter::triggerLimiter();
+				$this->raiseCondCount();
 				return AFPData::compareOp( $leftOperand, $rightOperand, $op );
 
 			case AFPTreeNode::LOGIC:
@@ -217,7 +234,7 @@ class AbuseFilterCachingParser extends AbuseFilterParser {
 				$leftOperand = $this->evalNode( $leftOperand );
 				$value = $leftOperand->toBool();
 				// Short-circuit.
-				if ( ( !$value && $op == '&' ) || ( $value && $op == '|' ) ) {
+				if ( ( !$value && $op === '&' ) || ( $value && $op === '|' ) ) {
 					return $leftOperand;
 				}
 				$rightOperand = $this->evalNode( $rightOperand );
@@ -241,8 +258,11 @@ class AbuseFilterCachingParser extends AbuseFilterParser {
 			case AFPTreeNode::INDEX_ASSIGNMENT:
 				list( $varName, $offset, $value ) = $node->children;
 
-				$array = $this->mVars->getVar( $varName );
-				if ( $array->type != AFPData::DARRAY ) {
+				if ( !$this->mVariables->varIsSet( $varName ) ) {
+					throw new AFPUserVisibleException( 'unrecognisedvar', $node->position, [ $varName ] );
+				}
+				$array = $this->mVariables->getVar( $varName );
+				if ( $array->getType() !== AFPData::DARRAY ) {
 					throw new AFPUserVisibleException( 'notarray', $node->position, [] );
 				}
 
@@ -261,8 +281,8 @@ class AbuseFilterCachingParser extends AbuseFilterParser {
 			case AFPTreeNode::ARRAY_APPEND:
 				list( $varName, $value ) = $node->children;
 
-				$array = $this->mVars->getVar( $varName );
-				if ( $array->type != AFPData::DARRAY ) {
+				$array = $this->mVariables->getVar( $varName );
+				if ( $array->getType() !== AFPData::DARRAY ) {
 					throw new AFPUserVisibleException( 'notarray', $node->position, [] );
 				}
 
@@ -273,13 +293,16 @@ class AbuseFilterCachingParser extends AbuseFilterParser {
 
 			case AFPTreeNode::SEMICOLON:
 				$lastValue = null;
+				// @phan-suppress-next-line PhanTypeSuspiciousNonTraversableForeach children is array here
 				foreach ( $node->children as $statement ) {
 					$lastValue = $this->evalNode( $statement );
 				}
 
 				return $lastValue;
 			default:
+				// @codeCoverageIgnoreStart
 				throw new AFPException( "Unknown node type passed: {$node->type}" );
+				// @codeCoverageIgnoreEnd
 		}
 	}
 }

@@ -1,10 +1,25 @@
 <?php
 
 class AbuseFilterViewExamine extends AbuseFilterView {
-	public static $examineType = null;
-	public static $examineId = null;
-
-	public $mCounter, $mSearchUser, $mSearchPeriodStart, $mSearchPeriodEnd;
+	/**
+	 * @var int Line number of the row, see RecentChange::$counter
+	 */
+	public $mCounter;
+	/**
+	 * @var string The user whose entries we're examinating
+	 */
+	public $mSearchUser;
+	/**
+	 * @var string The start time of the search period
+	 */
+	public $mSearchPeriodStart;
+	/**
+	 * @var string The end time of the search period
+	 */
+	public $mSearchPeriodEnd;
+	/**
+	 * @var string The ID of the filter we're examinating
+	 */
 	public $mTestFilter;
 
 	/**
@@ -21,7 +36,7 @@ class AbuseFilterViewExamine extends AbuseFilterView {
 		if ( count( $this->mParams ) > 1 && is_numeric( $this->mParams[1] ) ) {
 			$this->showExaminerForRC( $this->mParams[1] );
 		} elseif ( count( $this->mParams ) > 2
-			&& $this->mParams[1] == 'log'
+			&& $this->mParams[1] === 'log'
 			&& is_numeric( $this->mParams[2] )
 		) {
 			$this->showExaminerForLogEntry( $this->mParams[2] );
@@ -117,11 +132,12 @@ class AbuseFilterViewExamine extends AbuseFilterView {
 			return;
 		}
 
-		self::$examineType = 'rc';
-		self::$examineId = $rcid;
-
 		$vars = AbuseFilter::getVarsFromRCRow( $row );
-		$out->addJsConfigVars( 'wgAbuseFilterVariables', $vars->dumpAllVars( true ) );
+		$out->addJsConfigVars( [
+			'wgAbuseFilterVariables' => $vars->dumpAllVars( true ),
+			'abuseFilterExamine' => [ 'type' => 'rc', 'id' => $rcid ]
+		] );
+
 		$this->showExaminer( $vars );
 	}
 
@@ -149,10 +165,8 @@ class AbuseFilterViewExamine extends AbuseFilterView {
 			return;
 		}
 
-		self::$examineType = 'log';
-		self::$examineId = $logid;
-
-		if ( !SpecialAbuseLog::canSeeDetails( $row->afl_filter ) ) {
+		list( $filterID, $global ) = AbuseFilter::splitGlobalName( $row->afl_filter );
+		if ( !SpecialAbuseLog::canSeeDetails( $filterID, $global ) ) {
 			$out->addWikiMsg( 'abusefilter-log-cannot-see-details' );
 			return;
 		}
@@ -170,7 +184,10 @@ class AbuseFilterViewExamine extends AbuseFilterView {
 			}
 		}
 		$vars = AbuseFilter::loadVarDump( $row->afl_var_dump );
-		$out->addJsConfigVars( 'wgAbuseFilterVariables', $vars->dumpAllVars( true ) );
+		$out->addJsConfigVars( [
+			'wgAbuseFilterVariables' => $vars->dumpAllVars( true ),
+			'abuseFilterExamine' => [ 'type' => 'log', 'id' => $logid ]
+		] );
 		$this->showExaminer( $vars );
 	}
 

@@ -102,13 +102,18 @@ class AFPTreeNode {
 
 	/**
 	 * @return string
+	 * @codeCoverageIgnore
 	 */
 	public function toDebugString() {
 		return implode( "\n", $this->toDebugStringInner() );
 	}
 
+	/**
+	 * @return array
+	 * @codeCoverageIgnore
+	 */
 	private function toDebugStringInner() {
-		if ( $this->type == self::ATOM ) {
+		if ( $this->type === self::ATOM ) {
 			return [ "ATOM({$this->children->type} {$this->children->value})" ];
 		}
 
@@ -117,6 +122,7 @@ class AFPTreeNode {
 		};
 
 		$lines = [ "{$this->type}" ];
+		// @phan-suppress-next-line PhanTypeSuspiciousNonTraversableForeach children is array here
 		foreach ( $this->children as $subnode ) {
 			if ( $subnode instanceof AFPTreeNode ) {
 				$sublines = array_map( $align, $subnode->toDebugStringInner() );

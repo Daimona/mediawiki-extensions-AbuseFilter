@@ -105,7 +105,7 @@
 				filterEditor.scrollToRow( position.row );
 			} else {
 				$plainTextBox
-					.focus()
+					.trigger( 'focus' )
 					.textSelection( 'setSelection', { start: data.character } );
 			}
 		}
@@ -281,9 +281,10 @@
 	function editMessage( action ) {
 		var message = getCurrentMessage( action ),
 			defaultMsg = action === 'warn' ? 'warning' : 'disallowed',
-			url = mw.config.get( 'wgScript' ) +
-				'?title=MediaWiki:' + mw.util.wikiUrlencode( message ) +
-				'&action=edit&preload=MediaWiki:abusefilter-' + defaultMsg;
+			url = mw.util.getUrl( 'MediaWiki:' + message, {
+				action: 'edit',
+				preload: 'MediaWiki:abusefilter-' + defaultMsg
+			} );
 
 		window.open( url, '_blank' );
 	}
@@ -354,7 +355,7 @@
 	function onFilterKeypress( e ) {
 		if ( e.type === 'keypress' && e.which === 13 ) {
 			e.preventDefault();
-			$( '#mw-abusefilter-load' ).click();
+			$( '#mw-abusefilter-load' ).trigger( 'click' );
 		}
 	}
 
@@ -373,7 +374,7 @@
 			message: mw.msg( 'abusefilter-edit-warn-leave' )
 		} );
 
-		$form.submit( function () {
+		$form.on( 'submit', function () {
 			warnOnLeave.release();
 		} );
 	}
@@ -385,12 +386,11 @@
 	 * @param {Array} config The array with configuration passed from PHP code
 	 */
 	function buildSelector( action, config ) {
-		var disabled = config.disabled.length !== 0,
-			// mw-abusefilter-throttle-parameters, mw-abusefilter-tag-parameters
-			$container = $( '#mw-abusefilter-' + action + '-parameters' ),
+		// mw-abusefilter-throttle-parameters, mw-abusefilter-tag-parameters
+		var $container = $( '#mw-abusefilter-' + action + '-parameters' ),
 			// Character used to separate elements in the textarea.
 			separator = action === 'throttle' ? '\n' : ',',
-			selector, field, hiddenField;
+			selector, field, fieldOpts, hiddenField;
 
 		selector =
 			new OO.ui.TagMultiselectWidget( {
@@ -400,16 +400,18 @@
 				selected: config.values,
 				// abusefilter-edit-throttle-placeholder, abusefilter-edit-tag-placeholder
 				placeholder: OO.ui.msg( 'abusefilter-edit-' + action + '-placeholder' ),
-				disabled: disabled
+				disabled: config.disabled
 			} );
-		field =
-			new OO.ui.FieldLayout(
-				selector,
-				{
-					label: $( $.parseHTML( config.label ) ),
-					align: 'top'
-				}
-			);
+
+		fieldOpts = {
+			label: $( $.parseHTML( config.label ) ),
+			align: 'top'
+		};
+		if ( action === 'throttle' ) {
+			fieldOpts.help = new OO.ui.HtmlSnippet( config.help );
+		}
+
+		field = new OO.ui.FieldLayout( selector, fieldOpts );
 
 		// mw-abusefilter-hidden-throttle-field, mw-abusefilter-hidden-tag-field
 		hiddenField = OO.ui.infuse( $( '#mw-abusefilter-hidden-' + action + '-field' ) );
@@ -423,7 +425,7 @@
 	}
 
 	// On ready initialization
-	$( document ).ready( function () {
+	$( function () {
 		var basePath, readOnly,
 			$exportBox = $( '#mw-abusefilter-export' ),
 			isFilterEditor = mw.config.get( 'isFilterEditor' ),
@@ -493,12 +495,12 @@
 					$plainTextBox.val( filterEditor.getSession().getValue() );
 				} );
 
-				$( '#mw-abusefilter-switcheditor' ).click( switchEditor );
+				$( '#mw-abusefilter-switcheditor' ).on( 'click', switchEditor );
 			} );
 		}
 
 		// Hide the syntax ok message when the text changes
-		$plainTextBox.change( function () {
+		$plainTextBox.on( 'change', function () {
 			var $el = $( '#mw-abusefilter-syntaxresult' );
 
 			if ( $el.data( 'syntaxOk' ) ) {
@@ -506,27 +508,27 @@
 			}
 		} );
 
-		$( '#mw-abusefilter-load' ).click( fetchFilter );
-		$( '#mw-abusefilter-load-filter' ).keypress( onFilterKeypress );
+		$( '#mw-abusefilter-load' ).on( 'click', fetchFilter );
+		$( '#mw-abusefilter-load-filter' ).on( 'keypress', onFilterKeypress );
 
 		if ( isFilterEditor ) {
 			// Add logic for flags and consequences
-			$( '#mw-abusefilter-warn-preview-button' ).click(
+			$( '#mw-abusefilter-warn-preview-button' ).on( 'click',
 				function () { previewMessage( 'warn' ); }
 			);
-			$( '#mw-abusefilter-disallow-preview-button' ).click(
+			$( '#mw-abusefilter-disallow-preview-button' ).on( 'click',
 				function () { previewMessage( 'disallow' ); }
 			);
-			$( '#mw-abusefilter-warn-edit-button' ).click(
+			$( '#mw-abusefilter-warn-edit-button' ).on( 'click',
 				function () { editMessage( 'warn' ); }
 			);
-			$( '#mw-abusefilter-disallow-edit-button' ).click(
+			$( '#mw-abusefilter-disallow-edit-button' ).on( 'click',
 				function () { editMessage( 'disallow' ); }
 			);
-			$( '.mw-abusefilter-action-checkbox input' ).click( hideDeselectedActions );
+			$( '.mw-abusefilter-action-checkbox input' ).on( 'click', hideDeselectedActions );
 			hideDeselectedActions();
 
-			$( '#wpFilterGlobal' ).change( toggleCustomMessages );
+			$( '#wpFilterGlobal' ).on( 'change', toggleCustomMessages );
 			toggleCustomMessages();
 
 			cbEnabled = OO.ui.infuse( $( '#wpFilterEnabled' ) );
@@ -549,9 +551,9 @@
 				}
 			);
 
-			$( '#mw-abusefilter-edit-group-input select' ).change( onFilterGroupChange );
+			$( '#mw-abusefilter-edit-group-input select' ).on( 'change', onFilterGroupChange );
 
-			$( '#mw-abusefilter-export-link' ).click(
+			$( '#mw-abusefilter-export-link' ).on( 'click',
 				function ( e ) {
 					e.preventDefault();
 					$exportBox.toggle();
@@ -559,7 +561,7 @@
 			);
 		}
 
-		$( '#mw-abusefilter-syntaxcheck' ).click( doSyntaxCheck );
-		$( '#wpFilterBuilder' ).change( addText );
+		$( '#mw-abusefilter-syntaxcheck' ).on( 'click', doSyntaxCheck );
+		$( '#wpFilterBuilder' ).on( 'change', addText );
 	} );
 }() );

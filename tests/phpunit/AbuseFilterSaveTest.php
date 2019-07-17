@@ -33,16 +33,18 @@
  * @covers AbuseFilterParser
  */
 class AbuseFilterSaveTest extends MediaWikiTestCase {
-	protected static $mUser, $mParameters;
+	/** @var User The user saving filters */
+	protected static $mUser;
+	/** @var array Parameters for the test set being executed */
+	protected static $mParameters;
 
-	/**
-	 * @var array This tables will be deleted in parent::tearDown
-	 */
+	/** @var array This tables will be deleted in parent::tearDown */
 	protected $tablesUsed = [
 		'abuse_filter',
 		'abuse_filter_action',
 		'abuse_filter_history',
-		'abuse_filter_log'
+		'abuse_filter_log',
+		'user'
 	];
 
 	/**
@@ -88,6 +90,7 @@ class AbuseFilterSaveTest extends MediaWikiTestCase {
 				'abusefilter-modify-global' => true,
 			]
 		] );
+		$this->overrideMwServices();
 	}
 
 	/**
@@ -243,7 +246,7 @@ class AbuseFilterSaveTest extends MediaWikiTestCase {
 		$filter = self::$mParameters['id'];
 		$viewEdit = self::getViewEdit( $filter );
 		list( $newRow, $actions ) = $viewEdit->loadRequest( $filter );
-		self::$mParameters['rowActions'] = implode( ',', array_keys( array_filter( $actions ) ) );
+		self::$mParameters['rowActions'] = implode( ',', array_keys( $actions ) );
 
 		// Send data for validation and saving
 		$status = AbuseFilter::saveFilter( $viewEdit, $filter, $newRow, $actions );
@@ -416,6 +419,26 @@ class AbuseFilterSaveTest extends MediaWikiTestCase {
 			[
 				[
 					'filterParameters' => [
+						'rules' => '1!=0',
+						'description' => 'Empty tag',
+						'notes' => '',
+						'tagEnabled' => true,
+						'tagTags' => ''
+					],
+					'testData' => [
+						'doingWhat' => 'Trying to save a filter with an empty tag',
+						'expectedResult' => 'an error message saying that the tag name must be specified',
+						'expectedMessage' => 'tags-create-no-name',
+						'shouldFail' => true,
+						'shouldBeSaved' => false,
+						'customUserGroup' => '',
+						'needsOtherFilters' => false
+					]
+				]
+			],
+			[
+				[
+					'filterParameters' => [
 						'rules' => '1==1',
 						'description' => 'Global without perms',
 						'global' => true,
@@ -531,6 +554,44 @@ class AbuseFilterSaveTest extends MediaWikiTestCase {
 						'needsOtherFilters' => false
 					]
 				]
+			],
+			[
+				[
+					'filterParameters' => [
+						'rules' => '1==1',
+						'description' => 'Empty warning message',
+						'warnEnabled' => true,
+						'warnMessage' => '',
+					],
+					'testData' => [
+						'doingWhat' => 'Trying to save a filter with empty warning message',
+						'expectedResult' => 'an error message saying that the warning message cannot be empty',
+						'expectedMessage' => 'abusefilter-edit-invalid-warn-message',
+						'shouldFail' => true,
+						'shouldBeSaved' => false,
+						'customUserGroup' => '',
+						'needsOtherFilters' => false
+					]
+				]
+			],
+			[
+				[
+					'filterParameters' => [
+						'rules' => '1==1',
+						'description' => 'Empty disallow message',
+						'disallowEnabled' => true,
+						'disallowMessage' => '',
+					],
+					'testData' => [
+						'doingWhat' => 'Trying to save a filter with empty disallow message',
+						'expectedResult' => 'an error message saying that the disallow message cannot be empty',
+						'expectedMessage' => 'abusefilter-edit-invalid-disallow-message',
+						'shouldFail' => true,
+						'shouldBeSaved' => false,
+						'customUserGroup' => '',
+						'needsOtherFilters' => false
+					]
+				]
 			]
 		];
 	}
@@ -604,6 +665,7 @@ class AbuseFilterSaveTest extends MediaWikiTestCase {
 			[ [ '1', '-3,23', 'user', 'ip' ], 'abusefilter-edit-invalid-throttlecount' ],
 			[ [ '1', '5,2.3', 'user', 'ip' ], 'abusefilter-edit-invalid-throttleperiod' ],
 			[ [ '1', '4,-14', 'user', 'ip' ], 'abusefilter-edit-invalid-throttleperiod' ],
+			[ [ '1', '3,33,44', 'user', 'ip' ], 'abusefilter-edit-invalid-throttleperiod' ],
 			[ [ '1', '3,33' ], 'abusefilter-edit-empty-throttlegroups' ],
 			[ [ '1', '3,33', 'user', 'ip,foo,user' ], 'abusefilter-edit-invalid-throttlegroups' ],
 			[ [ '1', '3,33', 'foo', 'ip,user' ], 'abusefilter-edit-invalid-throttlegroups' ],

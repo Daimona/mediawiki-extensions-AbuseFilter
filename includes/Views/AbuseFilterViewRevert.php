@@ -1,7 +1,28 @@
 <?php
 
+use MediaWiki\Block\DatabaseBlock;
+use MediaWiki\MediaWikiServices;
+
 class AbuseFilterViewRevert extends AbuseFilterView {
-	public $origPeriodStart, $origPeriodEnd, $mPeriodStart, $mPeriodEnd;
+	/**
+	 * @var string The start time of the lookup period
+	 */
+	public $origPeriodStart;
+	/**
+	 * @var string The end time of the lookup period
+	 */
+	public $origPeriodEnd;
+	/**
+	 * @var string The same as $origPeriodStart
+	 */
+	public $mPeriodStart;
+	/**
+	 * @var string The same as $origPeriodEnd
+	 */
+	public $mPeriodEnd;
+	/**
+	 * @var string|null The reason provided for the revert
+	 */
 	public $mReason;
 
 	/**
@@ -164,7 +185,6 @@ class AbuseFilterViewRevert extends AbuseFilterView {
 			$conds[] = 'afl_timestamp <= ' . $dbr->addQuotes( $dbr->timestamp( $periodEnd ) );
 		}
 
-		// All but afl_filter, afl_ip, afl_deleted, afl_patrolled_by, afl_rev_id and afl_log_id
 		$selectFields = [
 			'afl_id',
 			'afl_user',
@@ -258,8 +278,8 @@ class AbuseFilterViewRevert extends AbuseFilterView {
 	public function revertAction( $action, $result ) {
 		switch ( $action ) {
 			case 'block':
-				$block = Block::newFromTarget( $result['user'] );
-				if ( !( $block && $block->getBy() == AbuseFilter::getFilterUser()->getId() ) ) {
+				$block = DatabaseBlock::newFromTarget( $result['user'] );
+				if ( !( $block && $block->getBy() === AbuseFilter::getFilterUser()->getId() ) ) {
 					// Not blocked by abuse filter
 					return false;
 				}
@@ -275,17 +295,14 @@ class AbuseFilterViewRevert extends AbuseFilterView {
 				$logEntry->publish( $logEntry->insert() );
 				return true;
 			case 'blockautopromote':
-				ObjectCache::getMainStashInstance()->delete(
+				MediaWikiServices::getInstance()->getMainObjectStash()->delete(
 					AbuseFilter::autoPromoteBlockKey( User::newFromId( $result['userid'] ) )
 				);
 				return true;
 			case 'degroup':
 				// Pull the user's groups from the vars.
 				$oldGroups = $result['vars']->getVar( 'user_groups' )->toNative();
-				$oldGroups = array_diff(
-					$oldGroups,
-					array_intersect( $oldGroups, User::getImplicitGroups() )
-				);
+				$oldGroups = array_diff( $oldGroups, User::getImplicitGroups() );
 
 				$rows = [];
 				foreach ( $oldGroups as $group ) {

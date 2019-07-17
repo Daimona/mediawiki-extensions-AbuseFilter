@@ -1,7 +1,5 @@
 <?php
 /**
- * Tests for the AbuseFilter parser
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -41,73 +39,37 @@
  * @covers AbuseFilterVariableHolder
  * @covers AFComputedVariable
  */
-class AbuseFilterParserTest extends MediaWikiTestCase {
+class AbuseFilterParserTest extends AbuseFilterParserTestCase {
 	/**
-	 * @return AbuseFilterParser
-	 */
-	public static function getParser() {
-		static $parser = null;
-		if ( !$parser ) {
-			$parser = new AbuseFilterParser();
-		} else {
-			$parser->resetState();
-		}
-		return $parser;
-	}
-
-	/**
-	 * @return AbuseFilterParser[]
-	 */
-	public static function getParsers() {
-		static $parsers = null;
-		if ( !$parsers ) {
-			$parsers = [
-				new AbuseFilterParser()
-				// @ToDo: Here we should also instantiate an AbuseFilterCachingParser as we'll have
-				// fixed its problems (T156095). Right now it may break otherwise working tests (see T201193)
-			];
-		}
-		return $parsers;
-	}
-
-	/**
+	 * @param string $rule The rule to parse
 	 * @dataProvider readTests
 	 */
-	public function testParser( $testName, $rule, $expected ) {
+	public function testParser( $rule ) {
 		foreach ( self::getParsers() as $parser ) {
-			$actual = $parser->parse( $rule );
-			$this->assertEquals( $expected, $actual, 'Running parser test ' . $testName );
+			$this->assertTrue( $parser->parse( $rule ), 'Parser used: ' . get_class( $parser ) );
 		}
 	}
 
 	/**
-	 * @return array
+	 * @return Generator|array
 	 */
 	public function readTests() {
-		$tests = [];
 		$testPath = __DIR__ . "/../parserTests";
 		$testFiles = glob( $testPath . "/*.t" );
 
 		foreach ( $testFiles as $testFile ) {
-			$testName = substr( $testFile, 0, -2 );
-
-			$resultFile = $testName . '.r';
+			$testName = basename( substr( $testFile, 0, -2 ) );
 			$rule = trim( file_get_contents( $testFile ) );
-			$result = trim( file_get_contents( $resultFile ) ) === 'MATCH';
 
-			$tests[] = [
-				basename( $testName ),
-				$rule,
-				$result
-			];
+			yield $testName => [ $rule ];
 		}
-
-		return $tests;
 	}
 
 	/**
 	 * Test expression evaluation
 	 *
+	 * @param string $expr The expression to evaluate
+	 * @param string $expected The expected result
 	 * @dataProvider provideExpressions
 	 */
 	public function testEvaluateExpression( $expr, $expected ) {
@@ -134,13 +96,42 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	}
 
 	/**
+	 * Test empty (or almost empty) syntax and ensure it doesn't match
+	 *
+	 * @param string $code
+	 * @dataProvider provideEmptySyntax
+	 */
+	public function testEmptySyntax( $code ) {
+		foreach ( self::getParsers() as $parser ) {
+			$this->assertFalse( $parser->parse( $code ) );
+		}
+	}
+
+	/**
+	 * Data provider for testEmptySyntax
+	 *
+	 * @return array
+	 */
+	public function provideEmptySyntax() {
+		return [
+			[ '' ],
+			[ '()' ],
+			[ ';;;;' ]
+		];
+	}
+
+	/**
 	 * Ensure that AbuseFilterTokenizer::OPERATOR_RE matches the contents
 	 * and order of AbuseFilterTokenizer::$operators.
 	 */
 	public function testOperatorRe() {
-		$operatorRe = '/(' . implode( '|', array_map( function ( $op ) {
-			return preg_quote( $op, '/' );
-		}, AbuseFilterTokenizer::$operators ) ) . ')/A';
+		$quotedOps = array_map(
+			function ( $op ) {
+				return preg_quote( $op, '/' );
+			},
+			AbuseFilterTokenizer::$operators
+		);
+		$operatorRe = '/(' . implode( '|', $quotedOps ) . ')/A';
 		$this->assertEquals( $operatorRe, AbuseFilterTokenizer::OPERATOR_RE );
 	}
 
@@ -150,22 +141,28 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 */
 	public function testRadixRe() {
 		$baseClass = implode( '', array_keys( AbuseFilterTokenizer::$bases ) );
-		$radixRe = "/([0-9A-Fa-f]+(?:\.\d*)?|\.\d+)([$baseClass])?/Au";
+		$radixRe = "/([0-9A-Fa-f]+(?:\.\d*)?|\.\d+)([$baseClass])?(?![a-z])/Au";
 		$this->assertEquals( $radixRe, AbuseFilterTokenizer::RADIX_RE );
 	}
 
 	/**
 	 * Ensure the number of conditions counted for given expressions is right.
 	 *
+	 * @param string $rule The rule to parse
+	 * @param int $expected The expected amount of used conditions
 	 * @dataProvider condCountCases
 	 */
 	public function testCondCount( $rule, $expected ) {
-		$parser = self::getParser();
-		$countBefore = AbuseFilter::$condCount;
-		$parser->parse( $rule );
-		$countAfter = AbuseFilter::$condCount;
-		$actual = $countAfter - $countBefore;
-		$this->assertEquals( $expected, $actual, 'Condition count for ' . $rule );
+		foreach ( self::getParsers() as $parser ) {
+			$parserClass = get_class( $parser );
+			$countBefore = $parser->getCondCount();
+			$parser->parse( $rule );
+			$countAfter = $parser->getCondCount();
+			$actual = $countAfter - $countBefore;
+			$this->assertEquals( $expected, $actual, "Wrong condition count for $rule with $parserClass" );
+			// Reset cache or it would compromise conditions count
+			$parser::$funcCache = [];
+		}
 	}
 
 	/**
@@ -176,90 +173,28 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 		return [
 			[ '((("a" == "b")))', 1 ],
 			[ 'contains_any("a", "b", "c")', 1 ],
-			[ '"a" == "b" == "c"', 2 ],
+			[ '"a" == "b" & "b" == "c"', 1 ],
+			[ '"a" == "b" | "b" == "c"', 2 ],
 			[ '"a" in "b" + "c" in "d" + "e" in "f"', 3 ],
 			[ 'true', 0 ],
 			[ '"a" == "a" | "c" == "d"', 1 ],
 			[ '"a" == "b" & "c" == "d"', 1 ],
+			[ '1 = 0 & 2 * 3 * 4 <= 560 & "a" = "b"', 1 ],
+			[ '1 = 1 & 2 * 3 * 4 <= 560 & "a" = "b"', 3 ],
+			[ '1 = 1 | 2 * 3 * 4 <= 560 | "a" = "b"', 1 ],
+			[ '1 = 0 | 2 * 3 * 4 <= 560 | "a" = "b"', 2 ],
 		];
 	}
 
 	/**
-	 * Ensure get_matches function captures returns expected output.
-	 * @param string $needle Regex to pass to get_matches.
-	 * @param string $haystack String to run regex against.
-	 * @param string[] $expected The expected values of the matched groups.
-	 * @covers AbuseFilterParser::funcGetMatches
-	 * @dataProvider getMatchesCases
+	 * Test for T204841
 	 */
-	public function testGetMatches( $needle, $haystack, $expected ) {
-		$parser = self::getParser();
-		$afpData = $parser->intEval( "get_matches('$needle', '$haystack')" )->data;
-
-		// Extract matches from AFPData.
-		$matches = array_map( function ( $afpDatum ) {
-			return $afpDatum->data;
-		}, $afpData );
-
-		$this->assertEquals( $expected, $matches );
-	}
-
-	/**
-	 * Data provider for get_matches method.
-	 * @return array
-	 */
-	public function getMatchesCases() {
-		return [
-			[
-				'You say (.*) \(and I say (.*)\)\.',
-				'You say hello (and I say goodbye).',
-				[
-					'You say hello (and I say goodbye).',
-					'hello',
-					'goodbye',
-				],
-			],
-			[
-				'I(?: am)? the ((walrus|egg man).*)\!',
-				'I am the egg man, I am the walrus !',
-				[
-					'I am the egg man, I am the walrus !',
-					'egg man, I am the walrus ',
-					'egg man',
-				],
-			],
-			[
-				'this (does) not match',
-				'foo bar',
-				[
-					false,
-					false,
-				],
-			],
-		];
-	}
-
-	/**
-	 * Base method for testing exceptions
-	 *
-	 * @param string $excep Identifier of the exception (e.g. 'unexpectedtoken')
-	 * @param string $expr The expression to test
-	 * @param string $caller The function where the exception is thrown
-	 */
-	private function exceptionTest( $excep, $expr, $caller ) {
-		$parser = self::getParser();
-		try {
-			$parser->parse( $expr );
-		} catch ( AFPUserVisibleException $e ) {
-			$this->assertEquals(
-				$excep,
-				$e->mExceptionID,
-				"Exception $excep not thrown in AbuseFilterParser::$caller"
-			);
-			return;
+	public function testArrayShortcircuit() {
+		$code = 'a := [false, false]; b := [false, false]; c := 42; d := [0,1];' .
+			'a[0] != false & b[1] != false & (b[5**2/(5*(4+1))] !== a[43-c] | a[d[0]] === b[d[c-41]])';
+		foreach ( self::getParsers() as $parser ) {
+			$this->assertFalse( $parser->parse( $code ), 'Parser: ' . get_class( $parser ) );
 		}
-
-		$this->fail( "Exception $excep not thrown in AbuseFilterParser::$caller" );
 	}
 
 	/**
@@ -267,13 +202,6 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 *
 	 * @param string $expr The expression to test
 	 * @param string $caller The function where the exception is thrown
-	 * @covers AbuseFilterParser::doLevelSet
-	 * @covers AbuseFilterParser::doLevelConditions
-	 * @covers AbuseFilterParser::doLevelBraces
-	 * @covers AbuseFilterParser::doLevelFunction
-	 * @covers AbuseFilterParser::doLevelAtom
-	 * @covers AbuseFilterParser::skipOverBraces
-	 * @covers AbuseFilterParser::doLevelArrayElements
 	 * @dataProvider expectedNotFound
 	 */
 	public function testExpectedNotFoundException( $expr, $caller ) {
@@ -308,7 +236,6 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 *
 	 * @param string $expr The expression to test
 	 * @param string $caller The function where the exception is thrown
-	 * @covers AbuseFilterParser::doLevelEntry
 	 * @dataProvider unexpectedAtEnd
 	 */
 	public function testUnexpectedAtEndException( $expr, $caller ) {
@@ -333,8 +260,6 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 *
 	 * @param string $expr The expression to test
 	 * @param string $caller The function where the exception is thrown
-	 * @covers AbuseFilterParser::doLevelSet
-	 * @covers AbuseFilterParser::getVarValue
 	 * @dataProvider unrecognisedVar
 	 */
 	public function testUnrecognisedVarException( $expr, $caller ) {
@@ -360,8 +285,6 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 *
 	 * @param string $expr The expression to test
 	 * @param string $caller The function where the exception is thrown
-	 * @covers AbuseFilterParser::doLevelSet
-	 * @covers AbuseFilterParser::doLevelArrayElements
 	 * @dataProvider notArray
 	 */
 	public function testNotArrayException( $expr, $caller ) {
@@ -379,6 +302,8 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 		return [
 			[ 'a := 5; a[1] = 5', 'doLevelSet' ],
 			[ 'a := 1; 3 = a[5]', 'doLevelArrayElements' ],
+			[ 'a := 2; a[] := 2', '[different callers]' ],
+			[ 'a := 3; a[3] := 5', '[different callers]' ]
 		];
 	}
 
@@ -387,8 +312,6 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 *
 	 * @param string $expr The expression to test
 	 * @param string $caller The function where the exception is thrown
-	 * @covers AbuseFilterParser::doLevelSet
-	 * @covers AbuseFilterParser::doLevelArrayElements
 	 * @dataProvider outOfBounds
 	 */
 	public function testOutOfBoundsException( $expr, $caller ) {
@@ -406,6 +329,7 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 		return [
 			[ 'a := [2]; a[5] = 9', 'doLevelSet' ],
 			[ 'a := [1,2,3]; 3 = a[5]', 'doLevelArrayElements' ],
+			[ 'a := [1]; a[15] := 5', '[different callers]' ]
 		];
 	}
 
@@ -414,7 +338,6 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 *
 	 * @param string $expr The expression to test
 	 * @param string $caller The function where the exception is thrown
-	 * @covers AbuseFilterParser::doLevelAtom
 	 * @dataProvider unrecognisedKeyword
 	 */
 	public function testUnrecognisedKeywordException( $expr, $caller ) {
@@ -439,7 +362,6 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 *
 	 * @param string $expr The expression to test
 	 * @param string $caller The function where the exception is thrown
-	 * @covers AbuseFilterParser::doLevelAtom
 	 * @dataProvider unexpectedToken
 	 */
 	public function testUnexpectedTokenException( $expr, $caller ) {
@@ -464,7 +386,6 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 *
 	 * @param string $expr The expression to test
 	 * @param string $caller The function where the exception is thrown
-	 * @covers AbuseFilterParser::getVarValue
 	 * @dataProvider disabledVar
 	 */
 	public function testDisabledVarException( $expr, $caller ) {
@@ -489,7 +410,6 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 *
 	 * @param string $expr The expression to test
 	 * @param string $caller The function where the exception is thrown
-	 * @covers AbuseFilterParser::setUserVariable
 	 * @dataProvider overrideBuiltin
 	 */
 	public function testOverrideBuiltinException( $expr, $caller ) {
@@ -514,8 +434,6 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 *
 	 * @param string $expr The expression to test
 	 * @param string $caller The function where the exception is thrown
-	 * @covers AbuseFilterParser::funcRCount
-	 * @covers AbuseFilterParser::funcGetMatches
 	 * @dataProvider regexFailure
 	 */
 	public function testRegexFailureException( $expr, $caller ) {
@@ -541,7 +459,6 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 *
 	 * @param string $expr The expression to test
 	 * @param string $caller The function where the exception is thrown
-	 * @covers AbuseFilterParser::funcIPInRange
 	 * @dataProvider invalidIPRange
 	 */
 	public function testInvalidIPRangeException( $expr, $caller ) {
@@ -566,31 +483,16 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 *   without 0 params. They should throw a 'noparams' exception.
 	 *
 	 * @param string $func The function to test
-	 * @covers AbuseFilterParser::checkEnoughArguments
-	 * @covers AbuseFilterParser::funcLc
-	 * @covers AbuseFilterParser::funcUc
-	 * @covers AbuseFilterParser::funcLen
-	 * @covers AbuseFilterParser::funcSpecialRatio
-	 * @covers AbuseFilterParser::funcCount
-	 * @covers AbuseFilterParser::funcRCount
-	 * @covers AbuseFilterParser::funcCCNorm
-	 * @covers AbuseFilterParser::funcSanitize
-	 * @covers AbuseFilterParser::funcRMSpecials
-	 * @covers AbuseFilterParser::funcRMWhitespace
-	 * @covers AbuseFilterParser::funcRMDoubles
-	 * @covers AbuseFilterParser::funcNorm
-	 * @covers AbuseFilterParser::funcStrRegexEscape
-	 * @covers AbuseFilterParser::castString
-	 * @covers AbuseFilterParser::castInt
-	 * @covers AbuseFilterParser::castFloat
-	 * @covers AbuseFilterParser::castBool
 	 * @dataProvider oneParamFuncs
-	 * @expectedException AFPUserVisibleException
-	 * @expectedExceptionMessageRegExp /^No parameters given to function/
 	 */
 	public function testNoParamsException( $func ) {
-		$parser = self::getParser();
-		$parser->parse( "$func()" );
+		foreach ( self::getParsers() as $parser ) {
+			$this->setExpectedException(
+				AFPUserVisibleException::class,
+				'No parameters given to function'
+			);
+			$parser->parse( "$func()" );
+		}
 	}
 
 	/**
@@ -627,26 +529,21 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 *   They should throw a 'notenoughargs' exception.
 	 *
 	 * @param string $func The function to test
-	 * @covers AbuseFilterParser::checkEnoughArguments
-	 * @covers AbuseFilterParser::funcGetMatches
-	 * @covers AbuseFilterParser::funcIPInRange
-	 * @covers AbuseFilterParser::funcContainsAny
-	 * @covers AbuseFilterParser::funcContainsAll
-	 * @covers AbuseFilterParser::funcCCNormContainsAny
-	 * @covers AbuseFilterParser::funcCCNormContainsAll
-	 * @covers AbuseFilterParser::funcEqualsToAny
-	 * @covers AbuseFilterParser::funcSubstr
-	 * @covers AbuseFilterParser::funcStrPos
-	 * @covers AbuseFilterParser::funcSetVar
 	 * @dataProvider twoParamsFuncs
-	 * @expectedException AFPUserVisibleException
-	 * @expectedExceptionMessageRegExp /^Not enough arguments to function [^ ]+ called at character \d+.\nExpected 2 arguments, got 1/
 	 */
 	public function testNotEnoughArgsExceptionTwo( $func ) {
-		$parser = self::getParser();
-		// Nevermind if the argument can't be string since we check the amount
-		// of parameters before anything else.
-		$parser->parse( "$func('foo')" );
+		foreach ( self::getParsers() as $parser ) {
+			// Nevermind if the argument can't be string since we check the amount
+			// of parameters before anything else.
+			$code = "$func('foo')";
+			$length = strlen( $code );
+			$this->setExpectedException(
+				AFPUserVisibleException::class,
+				"Not enough arguments to function $func called at character $length.\n" .
+				'Expected 2 arguments, got 1'
+			);
+			$parser->parse( $code );
+		}
 	}
 
 	/**
@@ -675,17 +572,19 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 	 *   They should throw a 'notenoughargs' exception.
 	 *
 	 * @param string $func The function to test
-	 * @covers AbuseFilterParser::checkEnoughArguments
-	 * @covers AbuseFilterParser::funcStrReplace
 	 * @dataProvider threeParamsFuncs
-	 * @expectedException AFPUserVisibleException
-	 * @expectedExceptionMessageRegExp /^Not enough arguments to function [^ ]+ called at character \d+.\nExpected 3 arguments, got 2/
 	 */
 	public function testNotEnoughArgsExceptionThree( $func ) {
-		$parser = self::getParser();
-		// Nevermind if the argument can't be string since we check the amount
-		// of parameters before anything else.
-		$parser->parse( "$func('foo', 'bar')" );
+		foreach ( self::getParsers() as $parser ) {
+			$this->setExpectedException(
+				AFPUserVisibleException::class,
+				"Not enough arguments to function $func called at character 25.\n" .
+				'Expected 3 arguments, got 2'
+			);
+			// Nevermind if the argument can't be string since we check the amount
+			// of parameters before anything else.
+			$parser->parse( "$func('foo', 'bar')" );
+		}
 	}
 
 	/**
@@ -712,36 +611,97 @@ class AbuseFilterParserTest extends MediaWikiTestCase {
 		$loggerMock->setCollect( true );
 		$this->setLogger( 'AbuseFilter', $loggerMock );
 
-		$parser = self::getParser();
-		$actual = $parser->parse( "$old === $new" );
+		$vars = new AbuseFilterVariableHolder();
+		// Set it under the new name, and check that the old name points to it
+		$vars->setVar( $new, 'Some value' );
 
-		$loggerBuffer = $loggerMock->getBuffer();
-		// Check that the use has been logged
-		$found = false;
-		foreach ( $loggerBuffer as $entry ) {
-			$check = preg_match( '/AbuseFilter: deprecated variable/', $entry[1] );
-			if ( $check ) {
-				$found = true;
-				break;
+		foreach ( self::getParsers() as $parser ) {
+			$pname = get_class( $parser );
+			$parser->setVariables( $vars );
+			$actual = $parser->parse( "$old === $new" );
+
+			$loggerBuffer = $loggerMock->getBuffer();
+			// Check that the use has been logged
+			$found = false;
+			foreach ( $loggerBuffer as $entry ) {
+				$check = preg_match( '/AbuseFilter: deprecated variable/', $entry[1] );
+				if ( $check ) {
+					$found = true;
+					break;
+				}
 			}
-		}
-		if ( !$found ) {
-			$this->fail( "The use of the deprecated variable $old was not logged." );
-		}
+			if ( !$found ) {
+				$this->fail( "The use of the deprecated variable $old was not logged. Parser: $pname" );
+			}
 
-		$this->assertTrue( $actual, "AbuseFilter deprecated variable $old is not parsed correctly" );
+			$this->assertTrue( $actual, "Parser: $pname" );
+		}
 	}
 
 	/**
 	 * Data provider for testDeprecatedVars
-	 * @return array
+	 * @return Generator|array
 	 */
 	public function provideDeprecatedVars() {
 		$deprecated = AbuseFilter::$deprecatedVars;
-		$data = [];
 		foreach ( $deprecated as $old => $new ) {
-			$data[] = [ $old, $new ];
+			yield $old => [ $old, $new ];
 		}
-		return $data;
+	}
+
+	/**
+	 * Ensure that things like `'a' === 'b' === 'c'` or `1 < 2 < 3` are rejected, while `1 < 2 == 3`
+	 * and `1 == 2 < 3` are not. (T218906)
+	 * @param string $code Code to parse
+	 * @param bool $valid Whether $code is valid (or should throw an exception)
+	 * @dataProvider provideConsecutiveComparisons
+	 */
+	public function testDisallowConsecutiveComparisons( $code, $valid ) {
+		foreach ( self::getParsers() as $parser ) {
+			$pname = get_class( $parser );
+			$actuallyValid = true;
+			try {
+				$parser->parse( $code );
+			} catch ( AFPUserVisibleException $e ) {
+				$actuallyValid = false;
+			}
+
+			$this->assertSame(
+				$valid,
+				$actuallyValid,
+				'The code should' . ( $valid ? ' ' : ' NOT ' ) . "be parsed correctly. Parser: $pname"
+			);
+		}
+	}
+
+	/**
+	 * Data provider for testDisallowConsecutiveComparisons
+	 *
+	 * @return Generator
+	 */
+	public function provideConsecutiveComparisons() {
+		// Same as AbuseFilterParser::doLevelCompares
+		$eqOps = [ '==', '===', '!=', '!==', '=' ];
+		$ordOps = [ '<', '>', '<=', '>=' ];
+		$ops = array_merge( $eqOps, $ordOps );
+		foreach ( $ops as $op1 ) {
+			foreach ( $ops as $op2 ) {
+				$testStr = "1 $op1 3.14 $op2 -1";
+				$valid = ( in_array( $op1, $eqOps ) && in_array( $op2, $ordOps ) ) ||
+					( in_array( $op1, $ordOps ) && in_array( $op2, $eqOps ) );
+				yield $testStr => [ $testStr, $valid ];
+			}
+		}
+		// Some more cases with more than 2 comparisons
+		$extra = [
+			'1 === 1 < 3 === 0',
+			'1 === 1 < 3 === 0 < 555',
+			'1 < 3 === 0 < 555',
+			'1 < 3 === 0 < 555 !== 444',
+			'1 != 0 < 3 == 1 > 0 != 0'
+		];
+		foreach ( $extra as $case ) {
+			yield $case => [ $case, false ];
+		}
 	}
 }

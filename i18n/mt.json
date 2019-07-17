@@ -5,7 +5,8 @@
 			"Giangian15",
 			"Roderick Mallia",
 			"Leli Forte",
-			"Matma Rex"
+			"Matma Rex",
+			"Fitoschido"
 		]
 	},
 	"abusefilter-desc": "Tapplika ewristika awtomatika lill-modifiki",
@@ -67,7 +68,6 @@
 	"abusefilter-log-details-diff": "Modifiki li saru",
 	"abusefilter-log-linkoncontribs": "reġistru tal-abbuż",
 	"abusefilter-log-linkoncontribs-text": "Reġistru tal-abbuż għal dan l-utent",
-	"abusefilter-log-hidden": "(daħla moħbija)",
 	"abusefilter-log-hidden-implicit": "(moħbi minħabba li r-reviżjoni ġiet imħassra)",
 	"abusefilter-log-cannot-see-details": "M'għandekx il-permessi sabiex tara d-dettalji ta' din id-daħla fir-reġistru.",
 	"abusefilter-log-details-hidden": "Ma tistax tara d-dettalji ta' din id-daħla minħabba li ġiet moħbija mill-pubbliku.",
@@ -126,7 +126,6 @@
 	"abusefilter-edit-oldwarning": "<strong>Qiegħed timmodifika verżjoni antika ta' dan il-filtru.\nL-istatistika kwotata huma għall-aktar verżjoni riċenti ta' dan il-filtru.\nJekk issalva l-modifiki tiegħek, dawn se jieħdu post dawk li huma preżenti issa.</strong> &bull;\n[[Special:AbuseFilter/history/$2|Irritorna lejn il-kronoloġija tal-filtru]].",
 	"abusefilter-edit-status-label": "Statistika:",
 	"abusefilter-edit-status": "Mill-aħħar {{PLURAL:$1|azzjoni|$1 azzjonijiet}}, dan il-filtru sab {{PLURAL:$2|korrispondenza waħda|$2 korrispondenzi}} ($3%).",
-	"abusefilter-edit-status-profile": "Mill-aħħar {{PLURAL:$1|azzjoni|$1 azzjonijiet}}, dan il-filtru sab {{PLURAL:$2|korrispondenza waħda|$2 korrispondenzi}} ($3%).\nIl-ħin medju ta' eżekuzzjoni hu ta' $4ms, u jikkonsma {{PLURAL:$5|kundizzjoni waħda|$5 kundizzjonijiet}} tal-limitu ta' kundizzjonijiet.",
 	"abusefilter-edit-new": "Filtru ġdid",
 	"abusefilter-edit-save": "Salva l-filtru",
 	"abusefilter-edit-id": "ID tal-filtru:",
@@ -296,7 +295,7 @@
 	"abusefilter-exception-dividebyzero": "Tentattiv li $2 jiġi diviż b'żero fil-karattru $1.",
 	"abusefilter-exception-unrecognisedvar": "Varjabbli $2 mhux magħruf fil-karattru $1.",
 	"abusefilter-exception-notenoughargs": "M'hemmx argumenti biżżejjed għall-funzjoni $2 fil-karattru $1.\n{{PLURAL:$3|Mistenni argument wieħed|Mistennija $3 argumenti}}, minflok hemm $4.",
-	"abusefilter-exception-regexfailure": "Żball fl-espressjoni regolari \"$3\" fil-karattru $1: \"$2\"",
+	"abusefilter-exception-regexfailure": "Żball fl-espressjoni regolari \"$2\" fil-karattru $1.",
 	"abusefilter-action-tag": "Tikketta",
 	"abusefilter-action-throttle": "Illimta",
 	"abusefilter-action-warn": "Avża",

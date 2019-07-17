@@ -1,0 +1,33 @@
+{
+	"@metadata": {
+		"authors": [
+			"Nerogaf",
+			"Red Winged Duck",
+			"Renessaince"
+		]
+	},
+	"apihelp-abusefiltercheckmatch-param-filter": "Паўнатэкставы фільтар для праверкі на адпаведнасьць.",
+	"apihelp-abusefiltercheckmatch-param-rcid": "Ідэнтыфікатар у нядаўніх зьменах, на аснове якога будзе зьдзейсьненая праверка.",
+	"apihelp-abusefilterchecksyntax-description": "Праверыць сынтаксыс асобнага фільтру злоўжываньняў.",
+	"apihelp-abusefilterchecksyntax-summary": "Праверыць сынтаксыс фільтру злоўжываньняў.",
+	"apihelp-abusefilterchecksyntax-example-1": "Праверыць сынтаксыс дзейнага фільтру",
+	"apihelp-abusefilterchecksyntax-example-2": "Праверыць сынтаксыс некарэктнага фільтру",
+	"apihelp-abusefilterevalexpression-param-expression": "Выраз для вылічэньня.",
+	"apihelp-abusefilterevalexpression-example-1": "Ацаніць просты выраз.",
+	"apihelp-abusefilterunblockautopromote-param-user": "Імя карыстальніка, якога вы жадаеце разблякаваць.",
+	"apihelp-query+abusefilters-description": "Паказаць падрабязнасьці фільтраў злоўжываньняў.",
+	"apihelp-query+abusefilters-summary": "Паказаць падрабязнасьці фільтраў злоўжываньняў.",
+	"apihelp-query+abusefilters-param-startid": "Ідэнтыфікатар фільтру, зь якога пачынаць пералік.",
+	"apihelp-query+abusefilters-param-endid": "Ідэнтыфікатар фільтру, на якім спыніць пералік.",
+	"apihelp-query+abusefilters-param-show": "Паказаць толькі фільтры, якія адпавядаюць гэтым крытэрам.",
+	"apihelp-query+abusefilters-param-limit": "Максымальная колькасьць фільтраў у сьпісе.",
+	"apihelp-query+abusefilters-param-prop": "Якія ўласьцівасьці атрымаць.",
+	"apihelp-query+abusefilters-example-1": "Сьпіс уключаных публічных фільтраў",
+	"apihelp-query+abusefilters-example-2": "Паказаць некаторыя падрабязнасьці пра фільтры",
+	"apihelp-query+abuselog-param-logid": "Паказаць запіс з пададзеным ідэнтыфікатарам журналу.",
+	"apihelp-query+abuselog-param-start": "Адзнака часу, зь якой пачынаць пералік.",
+	"apihelp-query+abuselog-param-title": "Паказаць толькі запісы, якія адбыліся на пададзенай старонцы.",
+	"apihelp-query+abuselog-param-prop": "Якія ўласьцівасьці атрымаць.",
+	"apihelp-query+abuselog-example-1": "Паказаць нядаўнія запісы ў журнале",
+	"apierror-abusefilter-badsyntax": "Сынтаксычная памылка ў фільтры."
+}

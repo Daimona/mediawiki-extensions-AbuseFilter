@@ -7,7 +7,8 @@
 			"Nemo bis",
 			"Nick1915",
 			"Matma Rex",
-			"Cusolotto"
+			"Cusolotto",
+			"Fitoschido"
 		]
 	},
 	"abusefilter-desc": "Àplica dele eurìstiche automatiche a le modifiche.",
@@ -64,7 +65,6 @@
 	"abusefilter-log-details-diff": "Modìfeghe fate",
 	"abusefilter-log-linkoncontribs": "registro abusi",
 	"abusefilter-log-linkoncontribs-text": "Registro dei abusi par sto utente",
-	"abusefilter-log-hidden": "(elemento sconto)",
 	"abusefilter-log-details-hidden": "No te podi védar i detagli de sta voce, parché i xe sconti al pùblico.",
 	"abusefilter-log-hide-legend": "Scondi elemento",
 	"abusefilter-log-hide-id": "ID de l'elemento:",
@@ -114,7 +114,6 @@
 	"abusefilter-edit-oldwarning": "<strong>Te sì drio modificar na version vecia del filtro.\nLe statistiche cità le se riferisse a la version pi nova del filtro.\nSalvando le modifiche vegnarà anulà tuti i canbiamenti fati da sta version in poi.</strong> &bull;\n[[Special:AbuseFilter/history/$2|Ritorna a la cronologia del filtro]].",
 	"abusefilter-edit-status-label": "Statìsteghe:",
 	"abusefilter-edit-status": "Rispeto {{PLURAL:$1|a l'azion pi recente|a le $1 azioni pi recenti}}, sto filtro el gà catà $2 {{PLURAL:$2|corispondensa|corispondense}} ($3 %).",
-	"abusefilter-edit-status-profile": "Rispeto {{PLURAL:$1|a l'azion pi recente|a le $1 azioni pi recenti}}, sto filtro el gà catà $2 {{PLURAL:$2|corispondensa|corispondense}} ($3 %).\nEl so tempo medio de esecuzion xe de $4 ms, e impiega $5 {{PLURAL:$5|condizione|condizioni}} del limite de condizioni.",
 	"abusefilter-edit-new": "Filtro novo",
 	"abusefilter-edit-save": "Salva filtro",
 	"abusefilter-edit-id": "ID del filtro:",
@@ -288,7 +287,7 @@
 	"abusefilter-exception-dividebyzero": "Tentativo de divìdar $2 par xero al caràtere $1.",
 	"abusefilter-exception-unrecognisedvar": "Variàbile $2 mia riconossùa al caràtere $1.",
 	"abusefilter-exception-notenoughargs": "No vien passà argomenti in bisogno a la funsion $2 ciamà al caràtere $1.\nLa se speta $3 {{PLURAL:$3|argomento|argumenti}}, ghe ne riva xo $4.",
-	"abusefilter-exception-regexfailure": "Eròr al caràtere $1 de l'espression regolare \"$3\": \"$2\"",
+	"abusefilter-exception-regexfailure": "Eròr al caràtere $1 de l'espression regolare \"$2\".",
 	"abusefilter-exception-overridebuiltin": "Overriding mia valido de la variàbile built-in \"$2\" al caràtere $1.",
 	"abusefilter-exception-outofbounds": "Richiesta de voce inesistente de l'elenco $2 (dimension lista = $3) al caratere $1.",
 	"abusefilter-exception-notarray": "Richiesta de un elemento de array da un non array al caratere $1.",

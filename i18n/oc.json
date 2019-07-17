@@ -5,7 +5,8 @@
 			"Matma Rex",
 			"Unuaiga",
 			"Guilhelma",
-			"Matěj Suchánek"
+			"Matěj Suchánek",
+			"Fitoschido"
 		]
 	},
 	"abusefilter-desc": "Aplica d'euristicas automaticas a las modificacions",
@@ -66,7 +67,6 @@
 	"abusefilter-log-details-diff": "Cambiaments faits dins la modificacion",
 	"abusefilter-log-linkoncontribs": "Jornal dels abuses",
 	"abusefilter-log-linkoncontribs-text": "Jornal dels abuses d'{{GENDER:$1|aqueste utilizaire|aquesta utilizaira}}",
-	"abusefilter-log-hidden": "(entrada amagada)",
 	"abusefilter-log-hidden-implicit": "(amagada perque la version es estada suprimida)",
 	"abusefilter-log-hide-legend": "Amagar l'entrada dins los jornals",
 	"abusefilter-log-hide-id": "Identificant de l'entrada de jornal :",
@@ -129,7 +129,6 @@
 	"abusefilter-edit-oldwarning": "<strong>Sètz a modificar una version anciana del filtre. Las estatisticas afichadas son per la version correnta d'aqueste. Se  salvatz vòstras modificacions, van suprimir las modificacions efectuadas ulteriorament.</strong> &bull; [[Special:AbuseFilter/history/$2|Tornar a l'istoric d'aqueste filtre]]",
 	"abusefilter-edit-status-label": "Estatisticas :",
 	"abusefilter-edit-status": "{{PLURAL:$1|Dins la darrièra accion|Demest las $1 darrièras accions}}, aqueste filtre a atench $2 ($3 %).",
-	"abusefilter-edit-status-profile": "{{PLURAL:$1|Dins la darrièra accion|Demest las $1 darrièras accions}}, aqueste filtre a atench $2 ($3 %).\nEn mejana, la durada d'execucion d'aqueste filtre es de $4 ms e utiliza $5 condicion{{PLURAL:$5||s}} del limit de las condicions.",
 	"abusefilter-edit-new": "Filtre novèl",
 	"abusefilter-edit-save": "Salvar lo filtre",
 	"abusefilter-edit-id": "Filtre ID :",
@@ -313,7 +312,7 @@
 	"abusefilter-exception-dividebyzero": "Ensag ilegal de devesir $2 per zèro al caractèr $1.",
 	"abusefilter-exception-unrecognisedvar": "Variabla pas reconeguda $2 al caractèr $1",
 	"abusefilter-exception-notenoughargs": "Pas pro de paramètres per la foncion $2 apelada al caractèr $1.\n$3 {{PLURAL:$3|argument demandat|arguments demandats}}, $4 {{PLURAL:$4|obtengut|obtenguts}}",
-	"abusefilter-exception-regexfailure": "Error dins l’expression regulara « $3 » al caractèr $1 : « $2 »",
+	"abusefilter-exception-regexfailure": "Error dins l’expression regulara « $2 » al caractèr $1.",
 	"abusefilter-exception-overridebuiltin": "Espotiment interdich de la variabla disponibla per defaut « $2 » al caractèr $1.",
 	"abusefilter-exception-outofbounds": "Demanda de l'element inexistent $2 (talha de la lista = $3) al caractèr $1.",
 	"abusefilter-exception-notarray": "Demanda d'un element dins quicòm mai qu'un tablèu al caractèr $1.",

@@ -1,5 +1,7 @@
 <?php
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * The default view used in Special:AbuseFilter
  */
@@ -48,16 +50,19 @@ class AbuseFilterViewList extends AbuseFilterView {
 		$searchEnabled = $this->canViewPrivate() && !(
 			$config->get( 'AbuseFilterCentralDB' ) !== null &&
 			!$config->get( 'AbuseFilterIsCentral' ) &&
-			$scope == 'global' );
+			$scope === 'global' );
 
 		if ( $searchEnabled ) {
 			$querypattern = $request->getVal( 'querypattern' );
 			$searchmode = $request->getVal( 'searchoption', 'LIKE' );
+		} else {
+			$querypattern = '';
+			$searchmode = '';
 		}
 
-		if ( $deleted == 'show' ) {
+		if ( $deleted === 'show' ) {
 			// Nothing
-		} elseif ( $deleted == 'only' ) {
+		} elseif ( $deleted === 'only' ) {
 			$conds['af_deleted'] = 1;
 		} else {
 			// hide, or anything else.
@@ -72,18 +77,19 @@ class AbuseFilterViewList extends AbuseFilterView {
 			$conds['af_hidden'] = 0;
 		}
 
-		if ( $scope == 'local' ) {
+		if ( $scope === 'local' ) {
 			$conds['af_global'] = 0;
-		} elseif ( $scope == 'global' ) {
+		} elseif ( $scope === 'global' ) {
 			$conds['af_global'] = 1;
 		}
 
 		$dbr = wfGetDB( DB_REPLICA );
 
-		if ( !empty( $querypattern ) ) {
+		if ( $querypattern !== '' ) {
 			if ( $searchmode !== 'LIKE' ) {
 				// Check regex pattern validity
 				Wikimedia\suppressWarnings();
+				// @phan-suppress-next-line PhanParamSuspiciousOrder Just testing the regex
 				$validreg = preg_match( '/' . $querypattern . '/', null );
 				Wikimedia\restoreWarnings();
 
@@ -152,21 +158,14 @@ class AbuseFilterViewList extends AbuseFilterView {
 		$deleted = $optarray['deleted'];
 		$furtherOptions = $optarray['furtherOptions'];
 		$scope = $optarray['scope'];
-
 		$searchEnabled = $optarray['searchEnabled'];
-
-		if ( $searchEnabled ) {
-			$querypattern = $optarray['querypattern'];
-			$searchmode = $optarray['searchmode'];
-		} else {
-			$querypattern = '';
-			$searchmode = '';
-		}
+		$querypattern = $optarray['querypattern'];
+		$searchmode = $optarray['searchmode'];
 
 		if (
 			$config->get( 'AbuseFilterCentralDB' ) !== null
 			&& !$config->get( 'AbuseFilterIsCentral' )
-			&& $scope == 'global'
+			&& $scope === 'global'
 		) {
 			$pager = new GlobalAbuseFilterPager(
 				$this,
@@ -280,7 +279,7 @@ class AbuseFilterViewList extends AbuseFilterView {
 	 * Show stats
 	 */
 	public function showStatus() {
-		$stash = ObjectCache::getMainStashInstance();
+		$stash = MediaWikiServices::getInstance()->getMainObjectStash();
 		$overflow_count = (int)$stash->get( AbuseFilter::filterLimitReachedKey() );
 		$match_count = (int)$stash->get( AbuseFilter::filterMatchesKey() );
 		$total_count = 0;

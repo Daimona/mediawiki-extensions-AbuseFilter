@@ -12,7 +12,19 @@ class AbuseFilterPager extends TablePager {
 	 */
 	protected $linkRenderer;
 
-	public $mPage, $mConds, $mQuery;
+	/**
+	 * @var AbuseFilterViewList The associated page
+	 */
+	public $mPage;
+	/**
+	 * @var array Query WHERE conditions
+	 */
+	public $mConds;
+	/**
+	 * @var string[] Info used for searching patterns. The first element is the specified pattern,
+	 *   the second is the search mode (LIKE, RLIKE or IRLIKE)
+	 */
+	public $mQuery;
 
 	/**
 	 * @param AbuseFilterViewList $page
@@ -199,7 +211,10 @@ class AbuseFilterPager extends TablePager {
 				$msg = $value ? 'abusefilter-hidden' : 'abusefilter-unhidden';
 				return $this->msg( $msg )->parse();
 			case 'af_hit_count':
-				if ( SpecialAbuseLog::canSeeDetails( $row->af_id, $row->af_hidden ) ) {
+				// Global here is used to determine whether the log entry is for an external, global
+				// filter, but all filters shown on Special:AbuseFilter are local.
+				$global = false;
+				if ( SpecialAbuseLog::canSeeDetails( $row->af_id, $global, $row->af_hidden ) ) {
 					$count_display = $this->msg( 'abusefilter-hitcount' )
 						->numParams( $value )->text();
 					$link = $this->linkRenderer->makeKnownLink(
@@ -259,7 +274,7 @@ class AbuseFilterPager extends TablePager {
 	 * @return string
 	 */
 	public function getTableClass() {
-		return 'TablePager mw-abusefilter-list-scrollable';
+		return parent::getTableClass() . ' mw-abusefilter-list-scrollable';
 	}
 
 	/**
@@ -291,6 +306,7 @@ class AbuseFilterPager extends TablePager {
 		];
 		if ( $this->mPage->getUser()->isAllowed( 'abusefilter-log-detail' ) ) {
 			$sortable_fields[] = 'af_hit_count';
+			$sortable_fields[] = 'af_public_comments';
 		}
 		return in_array( $name, $sortable_fields );
 	}
